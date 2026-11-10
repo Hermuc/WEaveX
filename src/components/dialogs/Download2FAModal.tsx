@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { KeyRound } from "lucide-react";
 import { tryInvoke } from "@/lib/tauri";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/events";
 import { AnimatePresence, motion } from "framer-motion";
 
 export default function Download2FAModal() {
@@ -16,7 +17,7 @@ export default function Download2FAModal() {
     let unlistenDl: (() => void) | undefined;
     let unlistenAuth: (() => void) | undefined;
 
-    listen("download://require_2fa", (e: { payload: unknown }) => {
+    listen(EVENTS.DOWNLOAD_REQUIRE_2FA, (e: { payload: unknown }) => {
       setPubfileid(e.payload as string);
       setIsAuth(false);
       setCode("");
@@ -25,7 +26,7 @@ export default function Download2FAModal() {
       unlistenDl = u;
     });
 
-    listen("auth://require_2fa", (e: { payload: unknown }) => {
+    listen(EVENTS.AUTH_REQUIRE_2FA, (e: { payload: unknown }) => {
       setPubfileid(e.payload as string); // It's actually username here
       setIsAuth(true);
       setCode("");

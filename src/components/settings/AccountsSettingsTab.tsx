@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "@/i18n/hooks";
 import { Trash2, AlertCircle, UserPlus } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/events";
 
 import { inTauri, invoke, tryInvoke, tryInvokeAction } from "@/lib/tauri";
 import { pushToast } from "@/stores/toasts";
@@ -79,7 +80,7 @@ function SteamSessionRow({ onOpenParser }: { onOpenParser: () => void }) {
     let active = true;
 
     if (inTauri) {
-      void listen("steam-login-success", async () => {
+      void listen(EVENTS.STEAM_LOGIN_SUCCESS, async () => {
         await invoke<number>("steam_sync_cookies").catch(() => 0);
         pushToast(
           t("messages.signed_in_to_steam") || "Signed in to Steam",
@@ -288,12 +289,12 @@ function DownloadAccountSection() {
     };
 
     try {
-      unlistenReady = await listen<string>("auth://qr_ready", (ev) => {
+      unlistenReady = await listen<string>(EVENTS.AUTH_QR_READY, (ev) => {
         setQrData(ev.payload);
         setQrModalOpen(true);
         setBusy(false);
       });
-      unlistenDone = await listen<string>("auth://done", (ev) => {
+      unlistenDone = await listen<string>(EVENTS.AUTH_DONE, (ev) => {
         if (ev.payload === "qr") {
           setBusy(false);
           cleanup();

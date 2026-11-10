@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Lock, User, KeyRound } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/events";
 import { useTranslation } from "@/i18n/hooks";
 import { inTauri, invoke, tryInvoke, tryInvokeOk } from "@/lib/tauri";
 import { pushToast } from "@/stores/toasts";
@@ -80,7 +81,7 @@ export default function DownloadLoginModal({
 
     const setup = async () => {
       const registered = [
-        await listen<string>("auth://success", async (ev) => {
+        await listen<string>(EVENTS.AUTH_SUCCESS, async (ev) => {
           if (ev.payload !== usernameRef.current.trim()) return;
           const ok = await tryInvokeOk("accounts_set_custom", {
             username: usernameRef.current.trim(),
@@ -98,7 +99,7 @@ export default function DownloadLoginModal({
             setBusy(false);
           }
         }),
-        await listen<string>("auth://failed", (ev) => {
+        await listen<string>(EVENTS.AUTH_FAILED, (ev) => {
           if (ev.payload !== usernameRef.current.trim()) return;
           setErrorMsg(
             t("messages.error") ||
@@ -106,11 +107,11 @@ export default function DownloadLoginModal({
           );
           setBusy(false);
         }),
-        await listen<string>("auth://require_app_confirm", (ev) => {
+        await listen<string>(EVENTS.AUTH_REQUIRE_APP_CONFIRM, (ev) => {
           if (ev.payload !== usernameRef.current.trim()) return;
           pushToast(t("bootstrap.steam_app_confirm"), "info");
         }),
-        await listen<string>("auth://done", (ev) => {
+        await listen<string>(EVENTS.AUTH_DONE, (ev) => {
           if (ev.payload !== usernameRef.current.trim()) return;
           setBusy(false);
         }),

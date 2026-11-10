@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { QrCode, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/events";
 import { invoke } from "@/lib/tauri";
 import { useTranslation } from "@/i18n/hooks";
 import { useAppStore } from "@/stores/app";
@@ -29,13 +30,13 @@ export function DownloadQRModal({
     let unlistenSuccess: (() => void) | undefined;
 
     const setup = async () => {
-      const u1 = await listen<string>("auth://qr_failed", (ev) => {
+      const u1 = await listen<string>(EVENTS.AUTH_QR_FAILED, (ev) => {
         pushToast(`${t("messages.error") || "QR Authentication Failed"}: ${ev.payload}`, "error");
         onOpenChange(false);
       });
       unlistenFailed = u1;
 
-      const u2 = await listen<string>("auth://qr_success", async (ev) => {
+      const u2 = await listen<string>(EVENTS.AUTH_QR_SUCCESS, async (ev) => {
         setBusy(true);
         const username = ev.payload;
         pushToast(`Authenticated as ${username}`, "success");
