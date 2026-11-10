@@ -20,32 +20,7 @@ import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
 import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
 import type { WorkshopFilters } from "@/stores/filters";
-import { WorkshopItem, WorkshopPage } from "@/types/workshop";
-
-interface CollectionInfo {
-  rating_star_file?: string;
-  num_ratings?: string;
-  item_count?: number;
-  unique_visitors?: string;
-  subscribers?: string;
-  favorited?: string;
-  total_favorited?: string;
-  posted_date?: string;
-  updated_date?: string;
-  [key: string]: string | number | undefined;
-}
-
-export interface CollectionContents {
-  collection_id: string;
-  title: string;
-  description: string;
-  preview_url: string;
-  author: string;
-  author_url: string;
-  items: WorkshopItem[];
-  related_collections?: WorkshopItem[];
-  info?: CollectionInfo;
-}
+import { CollectionContents, WorkshopItem, WorkshopPage } from "@/types/workshop";
 
 export default function CollectionsView() {
   const { t } = useTranslation();

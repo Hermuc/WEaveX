@@ -1,13 +1,6 @@
 import { create } from "zustand";
 
-interface UpdateInfo {
-  current_version: string;
-  latest_version: string;
-  update_available: boolean;
-  release_notes: string;
-  html_url: string;
-  error?: string | null;
-}
+import type { UpdateInfo } from "@/types/updater";
 
 interface UpdaterState {
   info: UpdateInfo | null;

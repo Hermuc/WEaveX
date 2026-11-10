@@ -30,6 +30,40 @@ export interface WorkshopPage {
   current_page: number;
 }
 
+export interface CollectionInfo {
+  rating_star_file?: string;
+  num_ratings?: string;
+  item_count?: number;
+  unique_visitors?: string;
+  subscribers?: string;
+  favorited?: string;
+  total_favorited?: string;
+  posted_date?: string;
+  updated_date?: string;
+  [key: string]: string | number | undefined;
+}
+
+export interface CollectionContents {
+  collection_id: string;
+  title: string;
+  description: string;
+  preview_url: string;
+  author: string;
+  author_url: string;
+  items: WorkshopItem[];
+  related_collections?: WorkshopItem[];
+  info?: CollectionInfo;
+}
+
+/** Per-item metadata returned by the backend metadata cache (tag/rating/date). */
+export interface InstalledMetadata {
+  tags?: unknown[];
+  rating_star_file?: string;
+  posted_date?: string;
+  updated_date?: string;
+  author?: string;
+}
+
 export interface InstalledWallpaper {
   pubfileid: string;
   folder: string;

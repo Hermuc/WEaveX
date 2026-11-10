@@ -9,32 +9,13 @@ import PreviewImage from "@/components/common/PreviewImage";
 import DetailsActionButtons from "./DetailsActionButtons";
 import DetailsMetaGrid from "./DetailsMetaGrid";
 import { useDetailsMeta, } from "@/hooks/useDetailsMeta";
-import { InstalledWallpaper, WorkshopItem } from "@/types/workshop";
+import { InstalledWallpaper } from "@/types/workshop";
+import type { InstalledProps, WorkshopProps } from "@/types/details";
 import { translateTagCategory, translateTagValue } from "@/lib/filterConfig";
 import { Tooltip } from "@/components/common/Tooltip";
 import { useAppStore } from "@/stores/app";
 import { dismissAllToasts } from "@/stores/toasts";
 import { inTauri, tryInvoke } from "@/lib/tauri";
-
-interface CommonProps {
-  onClose: () => void;
-}
-
-interface WorkshopProps extends CommonProps {
-  kind: "workshop";
-  item: WorkshopItem | null;
-  onDownload: (item: WorkshopItem) => void;
-}
-
-interface InstalledProps extends CommonProps {
-  kind: "installed";
-  item: InstalledWallpaper | null;
-  onApply: (item: InstalledWallpaper) => void;
-  onExtract: (item: InstalledWallpaper) => void;
-  onDelete: (item: InstalledWallpaper) => void;
-  onOpenFolder: (item: InstalledWallpaper) => void;
-  onCopyId: (item: InstalledWallpaper) => void;
-}
 
 type DetailsSidebarProps = WorkshopProps | InstalledProps;
 

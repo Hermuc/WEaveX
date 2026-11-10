@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useMemo } from "react";
 import { InstalledWallpaper } from "@/types/workshop";
-import { InstalledMetadata } from "@/hooks/useWallpaperActions";
+import { InstalledMetadata } from "@/types/workshop";
 import { useAppStore } from "@/stores/app";
 import { motion } from "framer-motion";
 import WallpaperCard from "./WallpaperCard";

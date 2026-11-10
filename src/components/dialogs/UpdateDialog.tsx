@@ -6,19 +6,11 @@ import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import Dialog from "@/components/common/Dialog";
 import { inTauri, invoke, tryInvoke } from "@/lib/tauri";
 import { useUpdaterStore } from "@/stores/updater";
+import type { UpdateInfo } from "@/types/updater";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-interface UpdateInfo {
-  current_version: string;
-  latest_version: string;
-  update_available: boolean;
-  release_notes: string;
-  html_url: string;
-  error?: string | null;
 }
 
 export default function UpdateDialog({ open, onOpenChange }: Props) {

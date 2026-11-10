@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-import { applyThemeClass } from "@/hooks/useTheme";
+import { applyThemeClass } from "@/lib/theme";
 import { SUPPORTED_LANGUAGES } from "@/i18n/languages";
 
 export type ThemeCode = "dark" | "light" | "nord" | "monokai" | "solarized" | "black";

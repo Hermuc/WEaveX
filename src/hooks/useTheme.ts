@@ -2,57 +2,16 @@ import { useEffect } from "react";
 
 import { invoke, inTauri } from "@/lib/tauri";
 import { useAppStore, ThemeCode } from "@/stores/app";
+import {
+  THEME_CODES,
+  VALID_ACCENT_NAMES,
+  applyThemeClass,
+} from "@/lib/theme";
 
-export const THEME_CODES: ThemeCode[] = [
-  "dark",
-  "light",
-  "nord",
-  "solarized",
-  "black",
-];
-
-// hex → "r g b" triples consumed by Tailwind's `rgb(var(--primary) / X)`.
-// Keeping both hex (for `--accent-color`) and triples (for `--primary`)
-// so any place still reading `--accent-color` stays consistent.
-const VALID_ACCENT_NAMES = [
-  "indigo",
-  "blue",
-  "purple",
-  "pink",
-  "rose",
-  "orange",
-  "amber",
-  "emerald",
-  "teal",
-  "cyan",
-];
-
-// Per-theme inline palette has been moved to index.css to rely purely on CSS-driven styling.
-
-export function applyThemeClass(theme: ThemeCode) {
-  const root = document.documentElement;
-  const body = document.body;
-  THEME_CODES.forEach((t) => {
-    root.classList.remove(`theme-${t}`);
-    body?.classList.remove(`theme-${t}`);
-  });
-  root.classList.add(`theme-${theme}`);
-  body?.classList.add(`theme-${theme}`);
-  if (theme === "light") {
-    root.classList.remove("dark");
-    body?.classList.remove("dark");
-  } else {
-    root.classList.add("dark");
-    body?.classList.add("dark");
-  }
-  root.dataset.theme = theme;
-
-  try {
-    localStorage.setItem("weave.theme", theme);
-  } catch {
-    /* noop */
-  }
-}
+// Re-exported for existing call sites (App.tsx / TopBar.tsx / main.tsx).
+// The definitions themselves now live in "@/lib/theme" so the app store can
+// import the pure DOM helpers without pulling in this hook module.
+export { THEME_CODES, applyThemeClass };
 
 function applyAccent(accent: string) {
   const root = document.documentElement;

@@ -17,6 +17,8 @@ import {
   normalizeLanguage,
 } from "@/i18n/system-language";
 import { maybeMinimize } from "@/lib/window";
+import type { UpdateInfo } from "@/types/updater";
+import { EVENTS } from "@/lib/events";
 
 export function useBootstrap() {
   const dotnetInitialized = useRef(false);
@@ -156,7 +158,7 @@ export function useBootstrap() {
           phase: string;
           message: string;
           progress?: number | null;
-        }>("dotnet://status", (event) => {
+        }>(EVENTS.DOTNET_STATUS, (event) => {
           useDotnetStore.getState().setStatus({
             phase: event.payload.phase as any,
             message: event.payload.message,
@@ -169,7 +171,7 @@ export function useBootstrap() {
           plugin_name: string;
           message: string;
           progress?: number | null;
-        }>("plugin://status", (event) => {
+        }>(EVENTS.PLUGIN_STATUS, (event) => {
           useDotnetStore.getState().setPluginStatus({
             phase: event.payload.phase as any,
             plugin_id: event.payload.plugin_id,
@@ -184,7 +186,7 @@ export function useBootstrap() {
           account: string;
           phase: string;
           progress?: number | null;
-        }>("download://status", (event) => {
+        }>(EVENTS.DOWNLOAD_STATUS, (event) => {
           const normalizedPhase = normalizeTaskPhase(event.payload.phase);
           useTasksStore.getState().upsert({
             ...event.payload,
@@ -224,7 +226,7 @@ export function useBootstrap() {
         }),
 
         listen<{ payload: string }>(
-          "download://require_app_confirm",
+          EVENTS.DOWNLOAD_REQUIRE_APP_CONFIRM,
           () => {
             pushToast(i18n.t("bootstrap.steam_app_confirm"), "info");
           },
@@ -235,7 +237,7 @@ export function useBootstrap() {
           account: string;
           phase: string;
           progress?: number | null;
-        }>("extract://status", (event) => {
+        }>(EVENTS.EXTRACT_STATUS, (event) => {
           const normalizedPhase = normalizeTaskPhase(event.payload.phase);
           useTasksStore.getState().upsert({
             ...event.payload,
@@ -308,15 +310,6 @@ export async function changeLanguageTo(code: string) {
       () => undefined,
     );
   }
-}
-
-interface UpdateInfo {
-  current_version: string;
-  latest_version: string;
-  update_available: boolean;
-  release_notes: string;
-  html_url: string;
-  error: string | null;
 }
 
 /**

@@ -17,7 +17,7 @@ import PreviewImage from "@/components/common/PreviewImage";
 import { useNavStore } from "@/stores/nav";
 import { inTauri } from "@/lib/tauri";
 import { translateTagCategory, translateTagValue } from "@/lib/filterConfig";
-import type { CollectionContents } from "@/components/views/CollectionsView";
+import type { CollectionContents } from "@/types/workshop";
 
 interface Props {
   open: boolean;
