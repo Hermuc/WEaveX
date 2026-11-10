@@ -116,7 +116,11 @@ pub async fn steam_auto_login(
         None => state.accounts.parser_credentials(),
     };
     if creds.username.is_empty() || creds.password.is_empty() {
-        return Ok(false);
+        // Surfacing this as Ok(false) made the UI print "Unknown error".
+        return Err(
+            "No parser account credentials available (the built-in account bundle is empty or              undecryptable). Add a custom account in Settings → Accounts and retry."
+                .to_string(),
+        );
     }
     let ok = state
         .steam_webview

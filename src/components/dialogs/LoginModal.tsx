@@ -235,8 +235,12 @@ export default function LoginModal({
       if (isLoggedIn) {
         return "SUCCESS";
       }
-      // If we are at step credentials, check if we need 2FA (heuristically, if it doesn't log in after ~6-8 seconds, it might be 2FA, but we'll wait out a bit)
-      if (step === "credentials" && i === 7) {
+      // Only treat a slow login as "needs 2FA" once the page has had time to
+      // actually submit (the login document needs ~3s just to render, and a
+      // Steam Guard prompt comes later). Previously this fired at i === 7 (~8s
+      // total) which almost always raced the form submission and dropped the
+      // user into a 2FA screen that had nothing to do with their account.
+      if (step === "credentials" && i === 14) {
         return "NEEDS_2FA";
       }
     }
