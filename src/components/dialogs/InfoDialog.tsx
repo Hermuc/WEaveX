@@ -1,0 +1,224 @@
+import { useEffect, useState } from "react";
+import { useTranslation } from "@/i18n/hooks";
+import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronUp,
+  FolderOpen,
+  HelpCircle,
+  Info,
+  RefreshCw,
+} from "lucide-react";
+
+const Github = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+    <path d="M9 18c-4.51 2-5-2-7-2" />
+  </svg>
+);
+
+import Dialog from "@/components/common/Dialog";
+import { inTauri, invoke, tryInvoke } from "@/lib/tauri";
+import AppIcon from "@/components/common/AppIcon";
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCheckUpdates?: () => void;
+  onOpenLegal?: () => void;
+}
+
+function FaqItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-b border-white/5 last:border-0">
+      <button 
+        type="button" 
+        className="flex w-full items-center justify-between py-2.5 text-left text-sm font-medium transition-colors hover:text-primary"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="pr-4">{q}</span>
+        {open ? <ChevronUp className="size-4 shrink-0 opacity-50" /> : <ChevronDown className="size-4 shrink-0 opacity-50" />}
+      </button>
+      {open && (
+        <div className="pb-3 text-xs leading-relaxed whitespace-pre-wrap text-muted">
+          {a}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+export default function InfoDialog({
+  open,
+  onOpenChange,
+  onCheckUpdates,
+  onOpenLegal,
+}: Props) {
+  const { t } = useTranslation();
+  const [version, setVersion] = useState<string>(__APP_VERSION__);
+  const [showFaq, setShowFaq] = useState(false);
+
+  useEffect(() => {
+    if (!open || !inTauri) return;
+    void tryInvoke<{ version: string; name: string }>("app_get_info").then(
+      (v) => {
+        if (v?.version) setVersion(v.version);
+      },
+    );
+  }, [open]);
+
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (!open) {
+      setShowFaq(false);
+    }
+  }
+
+  const toggleFaq = () => {
+    setShowFaq(!showFaq);
+  };
+
+  const openLink = async (url: string) => {
+    if (inTauri) await openExternal(url);
+    else window.open(url, "_blank");
+  };
+
+  const openDataFolder = async () => {
+    if (!inTauri) return;
+    await invoke("app_open_data_dir").catch(() => undefined);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={
+        <div className="flex items-center gap-2">
+          <Info size={18} className="text-primary" />
+          <span>{t("dialog.about")}</span>
+        </div>
+      }
+      size="sm"
+    >
+      <div className="flex flex-col items-center gap-3 text-center">
+        <AppIcon className="size-32" />
+        <div className="space-y-1">
+          <div className="text-lg font-semibold">{t("info.app_full_name")}</div>
+          <div className="text-xs text-muted">
+            {t("info.version_label")}{" "}
+            <span className="text-foreground">{version || "—"}</span>
+          </div>
+        </div>
+        <p className="text-sm text-muted">{t("info.description")}</p>
+        <p className="text-xs text-subtle">{t("info.developed")}</p>
+
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+          <button
+            className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
+            onClick={() => openLink("https://github.com/psyattack/WEave")}
+          >
+            <Github className="size-4" />
+            {t("buttons.github")}
+          </button>
+          <button
+            className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
+            onClick={() => {
+              if (onCheckUpdates) {
+                onOpenChange(false);
+                onCheckUpdates();
+              }
+            }}
+          >
+            <RefreshCw className="size-4" />
+            {t("buttons.check_updates")}
+          </button>
+          <button
+            className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
+            onClick={openDataFolder}
+            disabled={!inTauri}
+          >
+            <FolderOpen className="size-4" />
+            {t("buttons.open_data_folder")}
+          </button>
+          <button
+            className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
+            onClick={() => openLink("https://github.com/psyattack/WEave/releases")}
+          >
+            <BookOpen className="size-4" />
+            {t("buttons.changelog") || "Changelog"}
+          </button>
+          <button
+            className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
+            onClick={toggleFaq}
+            aria-expanded={showFaq}
+          >
+            <HelpCircle className="size-4" />
+            {t("buttons.faq") || "FAQ"}
+            {showFaq ? (
+              <ChevronUp className="size-3.5" />
+            ) : (
+              <ChevronDown className="size-3.5" />
+            )}
+          </button>
+          <button
+            className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
+            onClick={() => {
+              if (onOpenLegal) {
+                onOpenChange(false);
+                onOpenLegal();
+              }
+            }}
+          >
+            <BookOpen className="size-4" />
+            {t("buttons.legal")}
+          </button>
+        </div>
+
+        {showFaq && (
+          <div className="w-full rounded-md border border-border bg-surface-sunken p-3 text-left">
+            <div className="mb-2 text-[11px] font-semibold tracking-wide text-subtle uppercase">
+              {t("info.faq_title") || "Frequently Asked Questions"}
+            </div>
+            <div className="flex flex-col">
+              <FaqItem 
+                q={t("faq.download_issues_q") || "Что делать если обои не скачиваются?"} 
+                a={t("faq.download_issues_a") || "Попробовать снова, возможно немного подождать.\nМожеть быть такое, что пароли от системных аккаунтов для загрузки устарели, в таком случае можно:\n1) Добавить свой личный аккаунт без Steam Guard с копией Wallpaper Engine (Вкладка аккаунты в настройках) (Но зачем вам это, не понятно)\n2) Купить на различных площадках оффлайн-активации Wallpaper Engine без Steam Guard и добавить по методу выше (Стоят очень дёшего)\n3) Написать Issue в репозиторий на GitHub и я постараюсь оперативно обновить рабочие аккаунты"} 
+              />
+              <FaqItem 
+                q={t("faq.login_issues_q") || "В приложении не загружаются обои или возникает ошибка логина Steam"} 
+                a={t("faq.login_issues_a") || "Если вам не нужен 18+ контент, то можете не беспокоиться об этом и просто игнорировать.\n\nВ ином случае, откройте папку с данными (кнопка 'Open Data Folder' в окне About) и удалите папку «EBWebView» (это сбросит кэш встроенного браузера). Перезапустите программу.\n\nЕсли проблема не решилась/не решается долгое время, скорее всего проблемы с системным аккаунтом парсера, попробуйте указать свой собственный аккаунт Steam в настройках парсера (Accounts -> Custom account). Вы можете использовать любой аккаунт (пустышку), главное чтобы в настройках вашего аккаунта не было поставлено ограничений на 18+ контент.\n\nПри необходимости в будущем будет создано больше системных аккаунтов с автоматической выборкой."} 
+              />
+              <FaqItem 
+                q={t("faq.extract_q") || "Почему у некоторых загруженных обоев не работает кнопка 'Extract'?"} 
+                a={t("faq.extract_a") || "Не все обои в Workshop являются полноценными проектами (с файлом project.json). Существуют видео-обои (MP4) или веб-обои (HTML). Они уже готовы к использованию, и их не нужно (и технически невозможно) распаковывать как проекты Wallpaper Engine."} 
+              />
+              <FaqItem 
+                q={t("faq.storage_q") || "Где хранятся скачанные обои?"} 
+                a={t("faq.storage_a") || "Все скачанные обои сохраняются напрямую в корневую папку Wallpaper Engine в директорию `projects/myprojects`. Они сразу же становятся доступны в официальном приложении без дополнительных действий с вашей стороны."} 
+              />
+              <FaqItem 
+                q={t("faq.visibility_q") || "Обои скачиваются, но в оригинальном приложении их не видно"} 
+                a={t("faq.visibility_a") || "Убедитесь, что в настройках (System & Integration) вы указали правильный путь до папки Wallpaper Engine. Путь должен указывать на корневую папку, где лежат исполняемые файлы (wallpaper32.exe / wallpaper64.exe)."} 
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </Dialog>
+  );
+}
