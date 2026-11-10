@@ -120,6 +120,30 @@ impl AccountManager {
             .collect()
     }
 
+    /// Credentials to use for the *parser* (Workshop scraping) session.
+    ///
+    /// Selection order:
+    ///   1. the first user-added account (``is_custom == true``) — this is
+    ///      what lets a user browse the Workshop as *themselves* instead of
+    ///      sharing the bundled public account;
+    ///   2. the built-in dedicated parser account, so a fresh install still
+    ///      works with zero configuration.
+    ///
+    /// Before this existed, "Relogin to system account" always forced the
+    /// built-in account and silently ignored any account the user had added —
+    /// which is exactly why adding a custom account never changed who the
+    /// parser was signed in as.
+    pub fn preferred_parser_credentials(&self) -> AccountCredentials {
+        if let Some(custom) = self.user_store.list().into_iter().next() {
+            return AccountCredentials {
+                username: custom.username,
+                password: custom.password,
+                is_custom: true,
+            };
+        }
+        self.parser_credentials()
+    }
+
     /// Credentials for the dedicated parser login account
     /// (`weworkshopmanager2`). Used by `steam_auto_login` when no specific
     /// download account was requested, so the hidden webview always logs
@@ -165,4 +189,50 @@ fn load_builtin_bundle() -> Result<BuiltinAccountsBundle, String> {
         .decrypt(Nonce::from_slice(nonce), ciphertext)
         .map_err(|e| e.to_string())?;
     serde_json::from_slice(&plaintext).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// A fresh install has no custom accounts, so the bundled parser account
+    /// is used — the app still works out of the box.
+    #[test]
+    fn preferred_parser_falls_back_to_builtin() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+        let creds = mgr.preferred_parser_credentials();
+        let builtin = mgr.parser_credentials();
+        assert_eq!(creds.username, builtin.username);
+        assert!(!creds.is_custom);
+    }
+
+    /// Once the user adds their own account it must win over the bundled one;
+    /// this is the whole point of the A-fix (the parser logs in as the user).
+    #[test]
+    fn preferred_parser_prefers_custom_account() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+        mgr.add_user_account("my_own_account", "secret").unwrap();
+        let creds = mgr.preferred_parser_credentials();
+        assert_eq!(creds.username, "my_own_account");
+        assert_eq!(creds.password, "secret");
+        assert!(creds.is_custom);
+    }
+
+    /// Removing the custom account restores the built-in fallback.
+    #[test]
+    fn preferred_parser_reverts_after_removal() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+        mgr.add_user_account("temp_account", "pw").unwrap();
+        assert_eq!(mgr.preferred_parser_credentials().username, "temp_account");
+        mgr.remove_user_account("temp_account").unwrap();
+        let builtin = mgr.parser_credentials();
+        assert_eq!(
+            mgr.preferred_parser_credentials().username,
+            builtin.username
+        );
+    }
 }

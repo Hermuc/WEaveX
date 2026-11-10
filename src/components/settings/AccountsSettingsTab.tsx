@@ -121,12 +121,23 @@ function SteamSessionRow({ onOpenParser }: { onOpenParser: () => void }) {
         force: true,
       });
       if (res.ok && res.value) {
-        // Verify the session is actually valid after login.
-        const info = await tryInvoke<SteamAccountInfo | null>(
+        // Let WebView2 flush the new cookies before we re-read them; querying
+        // immediately after login sometimes returned null even on success.
+        await invoke<number>("steam_sync_cookies").catch(() => 0);
+        let info = await tryInvoke<SteamAccountInfo | null>(
           "steam_current_account",
           undefined,
           null,
         );
+        if (!info) {
+          await new Promise((r) => setTimeout(r, 1500));
+          await invoke<number>("steam_sync_cookies").catch(() => 0);
+          info = await tryInvoke<SteamAccountInfo | null>(
+            "steam_current_account",
+            undefined,
+            null,
+          );
+        }
         if (!info) {
           pushToast(
             t("messages.error") || "Login failed — session invalid",
@@ -134,7 +145,6 @@ function SteamSessionRow({ onOpenParser }: { onOpenParser: () => void }) {
           );
           return;
         }
-        await invoke<number>("steam_sync_cookies").catch(() => 0);
         pushToast(
           t("messages.signed_in_to_steam") || "Signed in to Steam",
           "success",
@@ -146,7 +156,12 @@ function SteamSessionRow({ onOpenParser }: { onOpenParser: () => void }) {
         await refreshSession();
         triggerGlobalRefresh();
       } else {
-        const err = !res.ok ? res.error : "Unknown error";
+        // `res.value === false` means Steam rejected the credentials; there is
+        // no descriptive error string in that case, so say so explicitly
+        // instead of the unhelpful "Unknown error".
+        const err = !res.ok
+          ? res.error
+          : "Steam rejected the credentials for the account in use. Add your own account in Settings -> Accounts, then retry.";
         pushToast(`${t("messages.error") || "Relogin failed"}: ${err}`, "error");
       }
     } catch (e) {

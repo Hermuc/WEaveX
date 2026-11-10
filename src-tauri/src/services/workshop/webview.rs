@@ -114,6 +114,9 @@ impl SteamWebview {
     pub async fn prepare_login(&self) -> Result<(), tauri::Error> {
         let _g = self.lock.lock().await;
         self.ensure_window()?;
+        // Drop any existing session first — otherwise Steam keeps showing the
+        // signed-in page at the login URL and the form never renders.
+        let _ = self.logout_locked().await;
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Ok(());
         };
@@ -121,6 +124,45 @@ impl SteamWebview {
         Ok(())
     }
 
+    /// Navigate away from the current Steam session **without** taking the
+    /// webview lock (callers already hold it).
+    ///
+    /// Why this exists: when a session is already established Steam renders the
+    /// logged-in page (or a Family View PIN prompt) at the login URL instead of
+    /// a login form. The scripted form fill then finds no `input[type=password]`
+    /// and silently does nothing — the UI just spins and finally reports an
+    /// error. Logging out first is what makes the form appear at all.
+    async fn logout_locked(&self) -> Result<(), String> {
+        if !self.is_logged_in_inner() {
+            // Already signed out — nothing to do.
+            return Ok(());
+        }
+        log::info!("[steam-webview] logging out existing Steam session before login");
+
+        // `steamLoginSecure` is HttpOnly, so `document.cookie = ...; Max-Age=0`
+        // cannot remove it — the JS deletion attempt is a no-op for exactly the
+        // cookie that matters. The only reliable way to drop it from WebView2 is
+        // to clear the browsing data store, which is what this does. That is
+        // safe here because we are *about to* sign in anyway; the earlier bug
+        // was calling it unconditionally before checking whether a session even
+        // existed (which logged the user out on every dialog open).
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return Err("No window".into());
+        };
+        w.clear_all_browsing_data().map_err(|e| e.to_string())?;
+
+        // Give WebView2 a moment to flush the cookie store.
+        for _ in 0..10 {
+            sleep(Duration::from_millis(400)).await;
+            if !self.is_logged_in_inner() {
+                log::info!("[steam-webview] logout confirmed");
+                return Ok(());
+            }
+        }
+        log::warn!("[steam-webview] logout could not clear steamLoginSecure");
+        Err("Could not sign out of the current Steam session. Close WEave, delete the SteamWebView folder under %LOCALAPPDATA%\\WEave, then reopen and try again."
+            .to_string())
+    }
     /// Pull all `steamcommunity.com` cookies from the webview and load them
     /// into our reqwest jar. WebView2 persists cookies automatically, so no
     /// additional file storage is needed.
@@ -192,6 +234,50 @@ impl SteamWebview {
         self.is_logged_in_inner()
     }
 
+    /// Navigate to the login page and wait until the credential form is
+    /// actually rendered (i.e. a password field exists).
+    ///
+    /// This has to be a *wait loop*, not a fixed sleep: after a logout Steam
+    /// redirects through store/community/help pages, and navigating before that
+    /// chain settles leaves the webview on the wrong page (the script then finds
+    /// no inputs and the login silently never happens).
+    async fn goto_login_form(&self) -> Result<bool, String> {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return Ok(false);
+        };
+        // `eval` never returns a value, so the probe reports its verdict by
+        // rewriting the URL fragment and we read it back via `url()`.
+        let probe = r#"
+            (function() {
+                var has = document.querySelector('input[type="password"]') ? 1 : 0;
+                try {
+                    history.replaceState(null, '', location.pathname + location.search + '#WE_FORM:' + has);
+                } catch (e) {}
+            })();
+        "#;
+
+        for _ in 0..5 {
+            w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
+                .map_err(|e| e.to_string())?;
+            for _ in 0..12 {
+                sleep(Duration::from_millis(700)).await;
+                if w.eval(probe).is_err() {
+                    continue;
+                }
+                sleep(Duration::from_millis(200)).await;
+                let ready = w
+                    .url()
+                    .ok()
+                    .and_then(|u| u.fragment().map(|f| f.to_string()))
+                    .map(|f| f.contains("WE_FORM:1"))
+                    .unwrap_or(false);
+                if ready {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
     /// Drive the hidden webview through Steam's login form using the given
     /// credentials. The window stays invisible throughout. Returns true if
     /// we end up with a `steamLoginSecure` cookie within the timeout.
@@ -218,9 +304,11 @@ impl SteamWebview {
         };
 
         if force {
-            // A forced re-login is the ONE place where dropping the persisted
-            // profile is intended (the caller explicitly asked to start over).
-            let _ = w.clear_all_browsing_data();
+            // Log out through Steam rather than wiping the whole WebView2
+            // profile: a logout clears the session cookies, while
+            // clear_all_browsing_data() also nukes unrelated state (and is
+            // slow). If the session is already gone this is a no-op.
+            let _ = self.logout_locked().await;
         }
 
         // Navigate to the login page and give the document time to paint.
@@ -259,6 +347,130 @@ impl SteamWebview {
         Ok(false)
     }
 
+    /// Diagnostic: read back the credential fields and the submit button label.
+    pub fn probe_login_form(&self) -> String {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return "no-window".into();
+        };
+        let script = r#"
+            (function() {
+                var ins = Array.prototype.slice.call(document.querySelectorAll('input'));
+                var pw = null;
+                for (var i=0;i<ins.length;i++){ if((ins[i].getAttribute('type')||'')==='password'){ pw = ins[i]; break; } }
+                var user = pw ? (pw.form || document).querySelector('input[type="text"]') : null;
+                var btns = Array.prototype.slice.call(document.querySelectorAll('button, input[type="submit"]'));
+                var labels = btns.map(function(b){ return ((b.innerText||b.value||'')+'').trim(); }).filter(function(s){ return s; });
+                var info = {
+                    inputCount: ins.length,
+                    passFound: !!pw,
+                    passValueLen: pw ? (pw.value||'').length : -1,
+                    userValueLen: user ? (user.value||'').length : -1,
+                    userTag: user ? (user.getAttribute('type')||'') : 'none',
+                    labels: labels.slice(0,12)
+                };
+                try {
+                    history.replaceState(null, '', location.pathname + location.search + '#WE_FRM:' + encodeURIComponent(JSON.stringify(info)));
+                } catch (e) {}
+            })();
+        "#;
+        let _ = w.eval(script);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        w.url()
+            .ok()
+            .and_then(|u| u.fragment().map(|f| f.to_string()))
+            .and_then(|f| {
+                f.strip_prefix("WE_FRM:").map(|s| {
+                    urlencoding::decode(s)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| s.to_string())
+                })
+            })
+            .unwrap_or_else(|| "no-fragment".into())
+    }
+    /// Diagnostic: return the visible text of the login webview (truncated).
+    /// Used to understand which step Steam is actually showing.
+    pub fn page_text(&self) -> String {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return String::new();
+        };
+        let script = r#"
+            (function() {
+                var t = (document.body && document.body.innerText) ? document.body.innerText : '';
+                try {
+                    history.replaceState(null, '', location.pathname + location.search + '#WE_TXT:' + encodeURIComponent(t.slice(0, 500)));
+                } catch (e) {}
+            })();
+        "#;
+        let _ = w.eval(script);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        w.url()
+            .ok()
+            .and_then(|u| u.fragment().map(|f| f.to_string()))
+            .and_then(|f| {
+                f.strip_prefix("WE_TXT:").map(|s| {
+                    urlencoding::decode(s)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| s.to_string())
+                })
+            })
+            .unwrap_or_default()
+    }
+    /// Report what the live login page is currently asking for.
+    ///
+    /// Returns one of:
+    ///   * `"code"`  – Steam wants a Steam Guard code (email/app authenticator)
+    ///   * `"app"`   – Steam is waiting for a mobile-app confirmation
+    ///   * `"none"`  – neither (still on the credential form, or an error page)
+    ///
+    /// The UI used to *guess* 2FA from a timeout, so any slow or failed login
+    /// was misreported as "2FA required" and the user stared at a spinner for a
+    /// code Steam never sent. This looks at the actual DOM instead.
+    pub async fn detect_2fa(&self) -> String {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return "none".into();
+        };
+        // `eval` cannot return a value, so the probe writes its verdict into the
+        // URL fragment and we read it back with `url()` — the same round-trip
+        // `steam_login_poll_error` already uses.
+        let script = r#"
+            (function() {
+                var verdict = 'none';
+                var inputs = Array.prototype.slice.call(document.querySelectorAll('input'));
+                var codeBoxes = inputs.filter(function(i) {
+                    var id = (i.getAttribute('id') || '').toLowerCase();
+                    var cls = (i.getAttribute('class') || '').toLowerCase();
+                    var ac = (i.getAttribute('autocomplete') || '').toLowerCase();
+                    return id.indexOf('twofactor') >= 0 || id.indexOf('authcode') >= 0
+                        || cls.indexOf('twofactor') >= 0 || cls.indexOf('authcode') >= 0
+                        || ac === 'one-time-code';
+                });
+                if (codeBoxes.some(function(i) { return !i.disabled && i.offsetParent !== null; })) {
+                    verdict = 'code';
+                } else {
+                    var text = (document.body && document.body.innerText) ? document.body.innerText : '';
+                    var lower = text.toLowerCase();
+                    var appEn = lower.indexOf('confirm') >= 0 && (lower.indexOf('mobile') >= 0 || lower.indexOf('phone') >= 0);
+                    var appZh = text.indexOf('确认') >= 0 && (text.indexOf('手机') >= 0 || text.indexOf('移动') >= 0);
+                    if (appEn || appZh) verdict = 'app';
+                }
+                try {
+                    history.replaceState(null, '', location.pathname + location.search + '#WE_2FA:' + verdict);
+                } catch (e) {}
+            })();
+        "#;
+        if w.eval(script).is_err() {
+            return "none".into();
+        }
+        sleep(Duration::from_millis(250)).await;
+        if let Ok(url) = w.url() {
+            if let Some(fragment) = url.fragment() {
+                if let Some(v) = fragment.strip_prefix("WE_2FA:") {
+                    return v.to_string();
+                }
+            }
+        }
+        "none".into()
+    }
     fn is_logged_in_inner(&self) -> bool {
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return false;
@@ -275,20 +487,32 @@ impl SteamWebview {
         let _g = self.lock.lock().await;
         self.ensure_window().map_err(|e| e.to_string())?;
 
+        // 1. Drop whatever session is active. While one exists Steam serves the
+        //    signed-in page (or a Family View PIN prompt) at the login URL, so
+        //    the form would never appear and the fill script silently no-ops.
+        self.logout_locked().await?;
+
+        // 2. Wait for the *form*, not for a fixed delay. Logging out triggers a
+        //    full WebView2 data reset, so the page can take many seconds to come
+        //    back; navigating before that settles leaves us on a Steam support
+        //    page with no inputs at all.
+        if !self.goto_login_form().await.map_err(|e| e.to_string())? {
+            return Err("Steam login form did not load. Check your network connection (a VPN may be required in some regions) and try again.".to_string());
+        }
+
+        // 3. Fill and submit. Retry a few times because the field may be
+        //    re-rendered by Steam's own validation.
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Err("No window".into());
         };
-
-        // Do NOT clear the profile here: it also drops any in-flight session
-        // cookie the user may still need. Just (re)load the form.
-        w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
-            .map_err(|e| e.to_string())?;
-        sleep(Duration::from_millis(2500)).await;
-
         let script = build_login_script(username, password);
-        for _ in 0..4 {
-            let _ = w.eval(&script);
-            sleep(Duration::from_millis(600)).await;
+        for _ in 0..5 {
+            w.eval(&script).map_err(|e| e.to_string())?;
+            sleep(Duration::from_millis(900)).await;
+            // Stop retrying once Steam accepted the submit (session appeared).
+            if self.is_logged_in_inner() {
+                break;
+            }
         }
         Ok(())
     }

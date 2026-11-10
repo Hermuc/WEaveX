@@ -336,6 +336,8 @@ export default {
     relogin: "Relogin to system account",
     login_button: "Login",
     login_title: "Steam Login",
+    back_to_login: "Back to credentials",
+    login_account_hint: "Enter your own Steam account. If you leave the fields empty and click 'Relogin to system account', your custom account (added under Accounts) is used first.",
     login_description: "Enter your Steam account credentials to log in to the parser.",
     login_2fa_description: "Enter your Steam Guard code or confirm the login on your mobile device.",
     steam_guard_help: "If Steam Guard mobile confirmation is requested, just confirm it on your phone and wait.",

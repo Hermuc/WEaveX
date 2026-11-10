@@ -336,6 +336,8 @@ export default {
     relogin: "重新登录系统账户",
     login_button: "登录",
     login_title: "Steam 登录",
+    back_to_login: "返回重新输入账号",
+    login_account_hint: "填写你自己的 Steam 账号。若留空直接点「重新登录系统账户」，会优先使用你在「账户」里添加的自定义账号。",
     login_description: "输入你的 Steam 账户凭据以登录解析器。",
     login_2fa_description: "输入 Steam Guard 验证码，或在移动设备上确认登录。",
     steam_guard_help: "如果提示进行 Steam Guard 手机确认，只需在手机上确认并等待即可。",

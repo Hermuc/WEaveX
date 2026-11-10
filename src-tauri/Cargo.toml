@@ -50,6 +50,11 @@ aes-gcm = "0.10.3"
 zip = "8.6.0"
 unrar = "0.5.8"
 urlencoding = "2.1.3"
+# Local QR rendering for the Steam login dialog. Generating the code in-process
+# removes the dependency on an external image service (api.qrserver.com), which
+# was both blocked by our own CSP img-src whitelist and frequently unreachable
+# from mainland China.
+qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.27.0"

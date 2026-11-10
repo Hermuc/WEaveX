@@ -67,11 +67,14 @@ export default function LoginModal({
       setIsPrepared(true);
     });
 
-    // Init QR Session
+    // Init QR Session. The backend renders the challenge locally and hands back
+    // a data: URL — pointing <img> at an external QR service used to fail (our
+    // CSP img-src blocked it, and the host is unreliable from CN).
     tryInvoke<{
       client_id: string;
       challenge_url: string;
       request_id: string;
+      qr_data_url: string;
     }>("steam_qr_begin").then((res) => {
       if (res) {
         setQrSession({
@@ -79,10 +82,7 @@ export default function LoginModal({
           requestId: res.request_id,
           createdAt: Date.now(),
         });
-        setQrCode(
-          "https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=" +
-            encodeURIComponent(res.challenge_url),
-        );
+        setQrCode(res.qr_data_url || null);
       }
     });
   }, [open]);
@@ -138,6 +138,7 @@ export default function LoginModal({
               client_id: string;
               challenge_url: string;
               request_id: string;
+              qr_data_url: string;
             }>("steam_qr_begin").then((res) => {
               if (res) {
                 setQrSession({
@@ -145,10 +146,7 @@ export default function LoginModal({
                   requestId: res.request_id,
                   createdAt: Date.now(),
                 });
-                setQrCode(
-                  "https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=" +
-                    encodeURIComponent(res.challenge_url),
-                );
+                setQrCode(res.qr_data_url || null);
               }
             });
             return;
@@ -222,7 +220,7 @@ export default function LoginModal({
     }
   };
 
-  const waitForLoginResult = async (maxAttempts = 15) => {
+  const waitForLoginResult = async (maxAttempts = 45) => {
     for (let i = 0; i < maxAttempts; i++) {
       if (!busyRef.current) return "ERROR";
       await new Promise((r) => setTimeout(r, 1000));
@@ -235,13 +233,32 @@ export default function LoginModal({
       if (isLoggedIn) {
         return "SUCCESS";
       }
-      // Only treat a slow login as "needs 2FA" once the page has had time to
-      // actually submit (the login document needs ~3s just to render, and a
-      // Steam Guard prompt comes later). Previously this fired at i === 7 (~8s
-      // total) which almost always raced the form submission and dropped the
-      // user into a 2FA screen that had nothing to do with their account.
-      if (step === "credentials" && i === 14) {
-        return "NEEDS_2FA";
+      // Surface Steam's own error text (wrong password / captcha / rate limit)
+      // as soon as it appears, instead of spinning until the timeout.
+      if (i >= 3) {
+        const polled = await tryInvoke<string | null>(
+          "steam_login_poll_error",
+          undefined,
+          null,
+        );
+        if (polled && polled.length > 20) {
+          setErrorMsg(polled);
+          return "ERROR";
+        }
+      }
+      // Ask the backend what the page is actually showing instead of guessing
+      // from elapsed time. The old "i === 25 ⇒ needs 2FA" heuristic turned every
+      // slow/failed login into a fake Steam Guard screen with a spinner for a
+      // code Steam never sent.
+      if (i >= 6) {
+        const state2fa = await tryInvoke<string>(
+          "steam_login_2fa_state",
+          undefined,
+          "none",
+        );
+        if (state2fa === "code" || state2fa === "app") {
+          return "NEEDS_2FA";
+        }
       }
     }
     return "FAILED";
@@ -256,8 +273,9 @@ export default function LoginModal({
     busyRef.current = true;
     try {
       await invoke("steam_login_fill", { username, password });
-      // Polling for success or 2fa
-      const result = await waitForLoginResult(10);
+      // Polling for success or 2fa (login_fill itself blocks ~10s: it signs the
+      // old session out, loads the form and submits it)
+      const result = await waitForLoginResult(45);
       if (result === "SUCCESS") {
         await finalizeLogin();
       } else if (result === "NEEDS_2FA") {
@@ -318,6 +336,12 @@ export default function LoginModal({
                 : t("settings.login_2fa_description") ||
                   "Enter your Steam Guard code or confirm the login on your mobile device."}
             </Dialog.Description>
+            {step === "credentials" && (
+              <p className="pt-1 text-[11px] leading-relaxed text-subtle/80">
+                {t("settings.login_account_hint") ||
+                  "填写你自己的 Steam 账号即可；留空直接点「重新登录系统账户」时，会优先使用你在「账户」里添加的自定义账号。"}
+              </p>
+            )}
           </div>
 
           <div className="px-6 pb-6">
@@ -466,10 +490,14 @@ export default function LoginModal({
                       <button
                         type="button"
                         className="btn-ghost w-full py-2 text-sm"
-                        onClick={() => setStep("credentials")}
+                        onClick={() => {
+                          setStep("credentials");
+                          setShowCodeInput(false);
+                          setErrorMsg(null);
+                        }}
                         disabled={busy}
                       >
-                        {t("buttons.cancel") || "Отмена"}
+                        {t("settings.back_to_login") || "返回重新输入账号"}
                       </button>
                     </div>
                   </div>

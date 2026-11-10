@@ -22,6 +22,7 @@ pub use services::download;
 pub use services::extract;
 pub use services::i18n;
 pub use services::metadata;
+pub use services::qr;
 pub use services::translator;
 pub use services::updater;
 pub use services::we_client;
@@ -167,6 +168,9 @@ pub fn run() {
             commands::steam::steam_qr_poll,
             commands::steam::steam_qr_login_finalize,
             commands::steam::steam_login_poll_error,
+            commands::steam::steam_login_2fa_state,
+            commands::steam::steam_login_page_text,
+            commands::steam::steam_login_probe_form,
             commands::dotnet::dotnet_get_root,
             commands::dotnet::dotnet_init,
             commands::plugins::plugins_init,

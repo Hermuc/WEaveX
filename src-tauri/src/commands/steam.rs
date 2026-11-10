@@ -111,16 +111,20 @@ pub async fn steam_auto_login(
             // Session cookie exists but is stale — fall through to re-login.
         }
     }
+    // Account selection:
+    //   Some(i) -> the account at that index (built-in list + user accounts)
+    //   None    -> the user's own account if they added one, else the bundled
+    //              parser account. Using `preferred_parser_credentials` here is
+    //              what makes "Relogin to system account" honour a custom
+    //              account instead of always forcing the shared public one.
     let creds = match account_index {
         Some(i) => state.accounts.credentials(i),
-        None => state.accounts.parser_credentials(),
+        None => state.accounts.preferred_parser_credentials(),
     };
     if creds.username.is_empty() || creds.password.is_empty() {
         // Surfacing this as Ok(false) made the UI print "Unknown error".
-        return Err(
-            "No parser account credentials available (the built-in account bundle is empty or              undecryptable). Add a custom account in Settings → Accounts and retry."
-                .to_string(),
-        );
+        return Err("No Steam credentials available. Add your account in Settings -> Accounts                     (Add custom account) and try again."
+            .to_string());
     }
     let ok = state
         .steam_webview
@@ -133,13 +137,22 @@ pub async fn steam_auto_login(
     Ok(ok)
 }
 
+/// Sign in to Steam **with the credentials the user typed**.
+///
+/// This is the manual path and it must never be re-routed through the bundled
+/// account: the previous flow dropped the typed credentials and called
+/// `steam_auto_login(accountIndex: None)`, which substitutes the built-in
+/// parser account — so a manual login could never succeed as the user.
 #[tauri::command]
 pub async fn steam_login_fill(
     state: AppStateHandle<'_>,
     username: &str,
     password: &str,
 ) -> Result<(), String> {
-    state.steam_webview.login_fill(username, password).await
+    state
+        .steam_webview
+        .login_fill(username.trim(), password)
+        .await
 }
 
 #[tauri::command]
@@ -166,6 +179,10 @@ pub struct QrBeginResponse {
     pub client_id: String,
     pub challenge_url: String,
     pub request_id: String,
+    /// Ready-to-use `data:image/png;base64,...` rendering of `challenge_url`.
+    /// Generated locally so the dialog never depends on an external QR service
+    /// (which the CSP blocks and which is often unreachable from CN).
+    pub qr_data_url: String,
 }
 
 #[tauri::command]
@@ -197,10 +214,15 @@ pub async fn steam_qr_begin() -> Result<QrBeginResponse, String> {
         .ok_or("No request_id")?
         .to_string();
 
+    // Render the challenge locally. A failure here must not break the login
+    // flow — the dialog can still fall back to the raw challenge URL.
+    let qr_data_url = crate::qr::render_qr_data_url(&challenge_url).unwrap_or_default();
+
     Ok(QrBeginResponse {
         client_id,
         challenge_url,
         request_id,
+        qr_data_url,
     })
 }
 
@@ -274,6 +296,26 @@ pub async fn steam_qr_login_finalize(
     let _ = state.app_handle.emit("steam-login-success", ());
 
     Ok(())
+}
+
+/// What is the login page asking for right now?
+/// Returns "code" (Steam Guard code), "app" (mobile confirmation) or "none".
+/// The frontend uses this instead of guessing from a timeout.
+#[tauri::command]
+pub async fn steam_login_2fa_state(state: AppStateHandle<'_>) -> Result<String, String> {
+    Ok(state.steam_webview.detect_2fa().await)
+}
+
+/// Diagnostic helper: credential-field state of the hidden login webview.
+#[tauri::command]
+pub async fn steam_login_probe_form(state: AppStateHandle<'_>) -> Result<String, String> {
+    Ok(state.steam_webview.probe_login_form())
+}
+
+/// Diagnostic helper: the visible text of the hidden login webview.
+#[tauri::command]
+pub async fn steam_login_page_text(state: AppStateHandle<'_>) -> Result<String, String> {
+    Ok(state.steam_webview.page_text())
 }
 
 #[tauri::command]
