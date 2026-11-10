@@ -15,7 +15,7 @@
   [![Vite](https://img.shields.io/badge/Vite-v8-646CFF?logo=vite&logoColor=white)](https://vite.dev)
   [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
   
-  [English version](README.md) · [简体中文](README.zh.md)
+  [English version](README.en.md) · [简体中文](README.md)
 </div>
 
 ---

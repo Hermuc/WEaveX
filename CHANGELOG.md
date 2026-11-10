@@ -9,6 +9,7 @@
 
 ### Changed
 - **i18n:** Replaced hard-coded `isRu` Russian/English branches in the Workshop search-options popover with real translation keys.
+- **docs:** README now defaults to Simplified Chinese (`README.md`); the English version moved to `README.en.md`. All cross-links between the three READMEs updated.
 
 ### Fixed
 - **i18n:** Added the missing `labels.extract_prefix` key to the Russian bundle (present in English, absent in Russian upstream).
