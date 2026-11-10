@@ -77,7 +77,11 @@ impl WallpaperEngineClient {
                     .join("wallpaper_engine"),
             );
             for lib in steam_library_folders(&steam_root) {
-                candidates.push(lib.join("steamapps").join("common").join("wallpaper_engine"));
+                candidates.push(
+                    lib.join("steamapps")
+                        .join("common")
+                        .join("wallpaper_engine"),
+                );
             }
         }
 
@@ -216,18 +220,27 @@ impl WallpaperEngineClient {
     }
 
     pub fn get_config_key(&self, project_path: &Path) -> Option<String> {
-        let is_workshop = project_path.to_string_lossy().contains("workshop\\content\\431960") || 
-                          project_path.to_string_lossy().contains("workshop/content/431960");
-                          
+        let is_workshop = project_path
+            .to_string_lossy()
+            .contains("workshop\\content\\431960")
+            || project_path
+                .to_string_lossy()
+                .contains("workshop/content/431960");
+
         if is_workshop {
-            return project_path.file_name().map(|n| n.to_string_lossy().to_string());
+            return project_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string());
         }
-        
+
         // For local projects, the key is the absolute path to the main file with forward slashes
         let json_path = project_path.join("project.json");
         if let Ok(raw) = std::fs::read_to_string(&json_path) {
             if let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw) {
-                let file = config.get("file").and_then(|v| v.as_str()).unwrap_or("scene.pkg");
+                let file = config
+                    .get("file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("scene.pkg");
                 let main_file = project_path.join(file);
                 let mut path_str = main_file.to_string_lossy().replace("\\", "/");
                 // Remove UNC prefix if present
@@ -237,7 +250,7 @@ impl WallpaperEngineClient {
                 return Some(path_str);
             }
         }
-        
+
         None
     }
 
@@ -252,7 +265,10 @@ impl WallpaperEngineClient {
             .ok_or_else(|| anyhow::anyhow!("Wallpaper Engine executable not found"))?;
 
         let (folder, json_path) = if project_path.is_dir() {
-            (project_path.to_path_buf(), project_path.join("project.json"))
+            (
+                project_path.to_path_buf(),
+                project_path.join("project.json"),
+            )
         } else {
             (
                 project_path
@@ -265,7 +281,11 @@ impl WallpaperEngineClient {
 
         if !force {
             if let Some(name) = folder.file_name().and_then(|n| n.to_str()) {
-                if self.current_wallpaper_pubfileid(monitor.unwrap_or(0)).as_deref() == Some(name) {
+                if self
+                    .current_wallpaper_pubfileid(monitor.unwrap_or(0))
+                    .as_deref()
+                    == Some(name)
+                {
                     return Ok(());
                 }
             }
@@ -305,19 +325,20 @@ impl WallpaperEngineClient {
         if let Some(m) = monitor {
             cmd.arg("-monitor").arg(m.to_string());
         }
-        
+
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             let raw_properties = format!("-properties RAW~({})~END", properties_json);
             cmd.raw_arg(raw_properties);
         }
-        
+
         #[cfg(not(windows))]
         {
-            cmd.arg("-properties").arg(format!("RAW~({})~END", properties_json));
+            cmd.arg("-properties")
+                .arg(format!("RAW~({})~END", properties_json));
         }
-        
+
         spawn_detached(cmd)?;
         Ok(())
     }
@@ -341,19 +362,20 @@ impl WallpaperEngineClient {
             .arg("openWallpaper")
             .arg("-file")
             .arg(json_path);
-            
+
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             let raw_properties = format!("-properties RAW~({})~END", properties_json);
             cmd.raw_arg(raw_properties);
         }
-        
+
         #[cfg(not(windows))]
         {
-            cmd.arg("-properties").arg(format!("RAW~({})~END", properties_json));
+            cmd.arg("-properties")
+                .arg(format!("RAW~({})~END", properties_json));
         }
-        
+
         spawn_detached(cmd)?;
         Ok(())
     }
@@ -374,15 +396,33 @@ impl WallpaperEngineClient {
         Ok(())
     }
 
-    pub fn play(&self, monitor: Option<u32>) -> anyhow::Result<()> { self.send_control("play", monitor) }
-    pub fn pause(&self, monitor: Option<u32>) -> anyhow::Result<()> { self.send_control("pause", monitor) }
-    pub fn stop(&self, monitor: Option<u32>) -> anyhow::Result<()> { self.send_control("stop", monitor) }
-    pub fn mute(&self) -> anyhow::Result<()> { self.send_control("mute", None) }
-    pub fn unmute(&self) -> anyhow::Result<()> { self.send_control("unmute", None) }
-    pub fn next_wallpaper(&self, monitor: Option<u32>) -> anyhow::Result<()> { self.send_control("nextWallpaper", monitor) }
-    pub fn previous_wallpaper(&self, monitor: Option<u32>) -> anyhow::Result<()> { self.send_control("previousWallpaper", monitor) }
-    pub fn show_icons(&self) -> anyhow::Result<()> { self.send_control("showIcons", None) }
-    pub fn hide_icons(&self) -> anyhow::Result<()> { self.send_control("hideIcons", None) }
+    pub fn play(&self, monitor: Option<u32>) -> anyhow::Result<()> {
+        self.send_control("play", monitor)
+    }
+    pub fn pause(&self, monitor: Option<u32>) -> anyhow::Result<()> {
+        self.send_control("pause", monitor)
+    }
+    pub fn stop(&self, monitor: Option<u32>) -> anyhow::Result<()> {
+        self.send_control("stop", monitor)
+    }
+    pub fn mute(&self) -> anyhow::Result<()> {
+        self.send_control("mute", None)
+    }
+    pub fn unmute(&self) -> anyhow::Result<()> {
+        self.send_control("unmute", None)
+    }
+    pub fn next_wallpaper(&self, monitor: Option<u32>) -> anyhow::Result<()> {
+        self.send_control("nextWallpaper", monitor)
+    }
+    pub fn previous_wallpaper(&self, monitor: Option<u32>) -> anyhow::Result<()> {
+        self.send_control("previousWallpaper", monitor)
+    }
+    pub fn show_icons(&self) -> anyhow::Result<()> {
+        self.send_control("showIcons", None)
+    }
+    pub fn hide_icons(&self) -> anyhow::Result<()> {
+        self.send_control("hideIcons", None)
+    }
 
     pub fn set_volume(&self, volume: u32) -> anyhow::Result<()> {
         let executable = self
@@ -392,7 +432,10 @@ impl WallpaperEngineClient {
         if let Some(parent) = executable.parent() {
             cmd.current_dir(parent);
         }
-        cmd.arg("-control").arg("setVolume").arg("-volume").arg(volume.to_string());
+        cmd.arg("-control")
+            .arg("setVolume")
+            .arg("-volume")
+            .arg(volume.to_string());
         spawn_detached(cmd)?;
         Ok(())
     }
@@ -405,7 +448,10 @@ impl WallpaperEngineClient {
         if let Some(parent) = executable.parent() {
             cmd.current_dir(parent);
         }
-        cmd.arg("-control").arg("openPlaylist").arg("-playlist").arg(playlist);
+        cmd.arg("-control")
+            .arg("openPlaylist")
+            .arg("-playlist")
+            .arg(playlist);
         if let Some(m) = monitor {
             cmd.arg("-monitor").arg(m.to_string());
         }
@@ -421,11 +467,13 @@ impl WallpaperEngineClient {
         if let Some(parent) = executable.parent() {
             cmd.current_dir(parent);
         }
-        cmd.arg("-control").arg("openProfile").arg("-profile").arg(profile);
+        cmd.arg("-control")
+            .arg("openProfile")
+            .arg("-profile")
+            .arg(profile);
         spawn_detached(cmd)?;
         Ok(())
     }
-
 
     pub fn open_wallpaper_engine(&self, show_window: bool) -> anyhow::Result<()> {
         let executable = self
@@ -592,8 +640,6 @@ fn read_steam_install_path_from_registry() -> Option<PathBuf> {
         .or_else(|| try_query(r"HKLM\SOFTWARE\Valve\Steam"))
 }
 
-
-
 /// Parse `<steam>/steamapps/libraryfolders.vdf`. Returns every library
 /// path Steam knows about (the file is a Valve KeyValues format —
 /// quoted-string pairs we can extract with a regex).
@@ -650,8 +696,8 @@ pub fn delete_wallpaper_folder(projects_path: &Path, pubfileid: &str) -> anyhow:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_delete_wallpaper_folder() {
@@ -684,7 +730,9 @@ mod tests {
         let steamapps = dir.path().join("steamapps");
         fs::create_dir(&steamapps).unwrap();
         let vdf = steamapps.join("libraryfolders.vdf");
-        fs::write(&vdf, r#"
+        fs::write(
+            &vdf,
+            r#"
         "libraryfolders"
         {
             "0"
@@ -696,11 +744,16 @@ mod tests {
                 "path" "D:\\SteamLibrary"
             }
         }
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let folders = steam_library_folders(dir.path());
         assert_eq!(folders.len(), 2);
-        assert_eq!(folders[0].to_str().unwrap(), "C:\\Program Files (x86)\\Steam");
+        assert_eq!(
+            folders[0].to_str().unwrap(),
+            "C:\\Program Files (x86)\\Steam"
+        );
         assert_eq!(folders[1].to_str().unwrap(), "D:\\SteamLibrary");
     }
 
@@ -708,7 +761,9 @@ mod tests {
     fn test_parse_project() {
         let dir = tempdir().unwrap();
         let project_json = dir.path().join("project.json");
-        fs::write(&project_json, r#"
+        fs::write(
+            &project_json,
+            r#"
         {
             "title": "Test Title",
             "preview": "preview.jpg",
@@ -716,7 +771,9 @@ mod tests {
             "type": "scene",
             "tags": ["Anime", "Cyberpunk"]
         }
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         let pkg_file = dir.path().join("scene.pkg");
         fs::write(&pkg_file, "dummy").unwrap();
 
@@ -725,7 +782,10 @@ mod tests {
         assert_eq!(wallpaper.title, "Test Title");
         assert_eq!(wallpaper.description, "A test wallpaper");
         assert_eq!(wallpaper.file_type, "scene");
-        assert_eq!(wallpaper.tags, vec!["Anime".to_string(), "Cyberpunk".to_string()]);
+        assert_eq!(
+            wallpaper.tags,
+            vec!["Anime".to_string(), "Cyberpunk".to_string()]
+        );
         assert!(wallpaper.has_pkg);
         assert!(wallpaper.preview.contains("preview.jpg"));
     }

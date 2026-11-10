@@ -21,7 +21,10 @@ impl TranslatorCache {
     }
 
     pub fn get(&self, target: &str, source: &str, text: &str) -> Option<String> {
-        self.cache.lock().get(&Self::key(target, source, text)).cloned()
+        self.cache
+            .lock()
+            .get(&Self::key(target, source, text))
+            .cloned()
     }
 
     pub fn put(&self, target: &str, source: &str, text: &str, value: String) {

@@ -94,7 +94,13 @@ pub async fn check_for_updates() -> UpdateInfo {
 fn version_is_newer(remote: &str, local: &str) -> bool {
     let parse = |v: &str| -> Vec<u32> {
         v.split('.')
-            .filter_map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().ok())
+            .filter_map(|p| {
+                p.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u32>()
+                    .ok()
+            })
             .collect()
     };
     let r = parse(remote);

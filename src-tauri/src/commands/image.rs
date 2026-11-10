@@ -12,15 +12,24 @@ pub fn open_path(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer").arg(&p).spawn().map_err(map_err)?;
+        std::process::Command::new("explorer")
+            .arg(&p)
+            .spawn()
+            .map_err(map_err)?;
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg(&p).spawn().map_err(map_err)?;
+        std::process::Command::new("open")
+            .arg(&p)
+            .spawn()
+            .map_err(map_err)?;
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        std::process::Command::new("xdg-open").arg(&p).spawn().map_err(map_err)?;
+        std::process::Command::new("xdg-open")
+            .arg(&p)
+            .spawn()
+            .map_err(map_err)?;
     }
     Ok(())
 }

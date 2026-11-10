@@ -11,10 +11,26 @@ const BASE_URL: &str = "https://steamcommunity.com/workshop/browse/";
 
 pub fn build_browse(filters: &WorkshopFilters) -> String {
     let mut builder = form_urlencoded::Serializer::new(String::new());
-    let c_start = if filters.created_date_range_start.is_empty() { "0" } else { &filters.created_date_range_start };
-    let c_end = if filters.created_date_range_end.is_empty() { "0" } else { &filters.created_date_range_end };
-    let u_start = if filters.updated_date_range_start.is_empty() { "0" } else { &filters.updated_date_range_start };
-    let u_end = if filters.updated_date_range_end.is_empty() { "0" } else { &filters.updated_date_range_end };
+    let c_start = if filters.created_date_range_start.is_empty() {
+        "0"
+    } else {
+        &filters.created_date_range_start
+    };
+    let c_end = if filters.created_date_range_end.is_empty() {
+        "0"
+    } else {
+        &filters.created_date_range_end
+    };
+    let u_start = if filters.updated_date_range_start.is_empty() {
+        "0"
+    } else {
+        &filters.updated_date_range_start
+    };
+    let u_end = if filters.updated_date_range_end.is_empty() {
+        "0"
+    } else {
+        &filters.updated_date_range_end
+    };
 
     builder
         .append_pair("appid", STEAM_APP_ID)
@@ -97,9 +113,7 @@ pub fn build_author_collections(profile_url: &str, filters: &WorkshopFilters) ->
 }
 
 pub fn build_collection_url(collection_id: &str) -> String {
-    format!(
-        "https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}"
-    )
+    format!("https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}")
 }
 
 fn add_tag_params<'a>(
@@ -160,15 +174,16 @@ mod tests {
 
     #[test]
     fn test_build_browse() {
-        let mut filters = WorkshopFilters::default();
-        filters.sort = "trend".to_string();
-        filters.days = "7".to_string();
-        filters.search = "cyberpunk".to_string();
-        filters.page = 2;
-        filters.category = "scene".to_string();
-
-        filters.required_flags = vec!["incompatible".to_string()];
-        filters.created_date_range_start = "1704067200".to_string();
+        let filters = WorkshopFilters {
+            sort: "trend".to_string(),
+            days: "7".to_string(),
+            search: "cyberpunk".to_string(),
+            page: 2,
+            category: "scene".to_string(),
+            required_flags: vec!["incompatible".to_string()],
+            created_date_range_start: "1704067200".to_string(),
+            ..Default::default()
+        };
 
         let url = build_browse(&filters);
         assert!(url.contains("browsesort=trend"));

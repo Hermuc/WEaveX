@@ -471,7 +471,9 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     }
 
     // Приоритет 3: поиск по селекторам в controls пагинации (старый метод)
-    if let Ok(paging_sel) = Selector::parse(".workshopBrowsePagingControls a, .workshopBrowsePagingControls span") {
+    if let Ok(paging_sel) =
+        Selector::parse(".workshopBrowsePagingControls a, .workshopBrowsePagingControls span")
+    {
         let mut max_page = 0;
         for el in doc.select(&paging_sel) {
             let text = el.text().collect::<String>().trim().to_string();
@@ -491,7 +493,7 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     // Улучшенный регулярный выражение, поддерживающий любой порядок атрибутов
     let re_pages_1 = Regex::new(r#"class="pagelink"[^>]*>\s*(\d+)\s*<"#).unwrap();
     let re_pages_2 = Regex::new(r#"class="page_current"[^>]*>\s*(\d+)\s*<"#).unwrap();
-    
+
     let max_page_1 = re_pages_1
         .captures_iter(html)
         .filter_map(|c| c[1].parse::<u32>().ok())
@@ -500,7 +502,7 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
         .captures_iter(html)
         .filter_map(|c| c[1].parse::<u32>().ok())
         .max();
-        
+
     let max_page = max_page_1.max(max_page_2);
     if let Some(max) = max_page {
         let per_page = items.len().max(30) as u64;
@@ -513,7 +515,6 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     }
     (1, items.len() as u64)
 }
-
 
 #[cfg(test)]
 mod tests {

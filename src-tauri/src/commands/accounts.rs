@@ -1,10 +1,10 @@
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{command, AppHandle, Emitter};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+use tauri::{command, AppHandle, Emitter};
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
@@ -16,7 +16,8 @@ use crate::plugin_paths;
 type ChildHandle = Arc<AsyncMutex<Option<Child>>>;
 static AUTH_HANDLES: Lazy<Mutex<HashMap<String, ChildHandle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-static QR_LOGIN_HANDLE: Lazy<Mutex<ChildHandle>> = Lazy::new(|| Mutex::new(Arc::new(AsyncMutex::new(None))));
+static QR_LOGIN_HANDLE: Lazy<Mutex<ChildHandle>> =
+    Lazy::new(|| Mutex::new(Arc::new(AsyncMutex::new(None))));
 
 #[derive(Serialize)]
 pub struct AccountSummary {
@@ -68,10 +69,7 @@ pub fn accounts_set_custom(
 
 /// Remove a single user account by username.
 #[command]
-pub fn accounts_remove_custom(
-    state: AppStateHandle<'_>,
-    username: String,
-) -> Result<(), String> {
+pub fn accounts_remove_custom(state: AppStateHandle<'_>, username: String) -> Result<(), String> {
     state.accounts.remove_user_account(username.trim())
 }
 
@@ -89,13 +87,13 @@ pub fn accounts_list_custom(state: AppStateHandle<'_>) -> Vec<String> {
 }
 
 #[command]
-pub async fn accounts_login_qr(
-    state: AppStateHandle<'_>,
-    app: AppHandle,
-) -> Result<(), String> {
+pub async fn accounts_login_qr(state: AppStateHandle<'_>, app: AppHandle) -> Result<(), String> {
     let depot_exe = plugin_paths::depot_downloader().map_err(|e| e.to_string())?;
 
-    log::info!("[auth-qr] Starting DepotDownloader at: {}", depot_exe.display());
+    log::info!(
+        "[auth-qr] Starting DepotDownloader at: {}",
+        depot_exe.display()
+    );
 
     // Launch DepotDownloader DIRECTLY (not via `cmd /c "chcp ... && ..."`).
     // The cmd wrapper was the real cause of the blank QR: Rust escapes the inner
@@ -107,16 +105,11 @@ pub async fn accounts_login_qr(
     // needed: block glyphs arrive either as UTF-8 or as a single OEM code-page
     // byte (which becomes U+FFFD and is mapped back to a block).
     let mut cmd = Command::new(&depot_exe);
-    cmd.args([
-        "-app", "730",
-        "-depot", "0",
-        "-remember-password",
-        "-qr",
-    ])
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .kill_on_drop(true);
+    cmd.args(["-app", "730", "-depot", "0", "-remember-password", "-qr"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     // DepotDownloaderMod needs the bundled .NET runtime root to start.
     if let Some(ref root) = *state.dotnet_root.lock() {
@@ -141,7 +134,7 @@ pub async fn accounts_login_qr(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let child_handle = Arc::new(AsyncMutex::new(Some(child)));
-    
+
     {
         let mut qr_handle = QR_LOGIN_HANDLE.lock();
         *qr_handle = child_handle.clone();
@@ -161,7 +154,9 @@ pub async fn accounts_login_qr(
             let mut buf = [0u8; 1024];
             let mut pending: Vec<u8> = Vec::new();
             while let Ok(n) = out.read(&mut buf).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 pending.extend_from_slice(&buf[..n]);
                 while let Some(pos) = pending.iter().position(|&b| b == b'\n') {
                     // drain the line including its trailing newline byte
@@ -176,7 +171,9 @@ pub async fn accounts_login_qr(
                 }
             }
             if !pending.is_empty() {
-                if pending.last() == Some(&b'\r') { pending.pop(); }
+                if pending.last() == Some(&b'\r') {
+                    pending.pop();
+                }
                 let line = String::from_utf8_lossy(&pending).into_owned();
                 let _ = tx.send(line).await;
             }
@@ -190,7 +187,9 @@ pub async fn accounts_login_qr(
             let mut reader = tokio::io::BufReader::new(&mut err);
             let mut line = String::new();
             while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 let trimmed = line.trim().to_string();
                 if !trimmed.is_empty() {
                     let _ = tx.send(trimmed).await;
@@ -286,8 +285,10 @@ pub async fn accounts_login_qr(
 
             if capturing_qr {
                 let is_empty_or_spaces = line.chars().all(|ch| ch == ' ');
-                let has_blocks =
-                    line.contains('█') || line.contains('▄') || line.contains('▀') || line.contains('�');
+                let has_blocks = line.contains('█')
+                    || line.contains('▄')
+                    || line.contains('▀')
+                    || line.contains('�');
 
                 if is_empty_or_spaces || has_blocks {
                     // If the terminal encoding messed up the blocks, fix them
@@ -322,8 +323,7 @@ pub async fn accounts_login_qr(
                         qr_emitted = true;
                     }
                 }
-            } else if lower.contains("with this qr code:")
-                || lower.contains("qr code has changed:")
+            } else if lower.contains("with this qr code:") || lower.contains("qr code has changed:")
             {
                 // A fresh QR code is about to be drawn. Reset state so the new
                 // code is captured and re-emitted (Steam rotates the challenge URL
@@ -360,7 +360,11 @@ pub async fn accounts_login_qr(
         // Process exited before producing any QR -> report failure so the modal
         // closes with an error instead of showing "Generating..." forever.
         if !qr_emitted && we_killed_child {
-            app.emit("auth://qr_failed", "DepotDownloader exited before producing a QR code").ok();
+            app.emit(
+                "auth://qr_failed",
+                "DepotDownloader exited before producing a QR code",
+            )
+            .ok();
         }
         app.emit("auth://done", "qr").ok();
     });
@@ -374,7 +378,7 @@ pub async fn accounts_cancel_qr() -> Result<(), String> {
         let qr_handle = QR_LOGIN_HANDLE.lock();
         qr_handle.clone()
     };
-    
+
     if let Ok(mut child_guard) = child_handle_opt.try_lock() {
         if let Some(mut c) = child_guard.take() {
             let _ = c.kill().await;
@@ -425,13 +429,17 @@ pub async fn accounts_verify_custom(
     password: String,
 ) -> Result<(), String> {
     let depot_exe = plugin_paths::depot_downloader().map_err(|e| e.to_string())?;
-    
+
     let mut cmd = Command::new(&depot_exe);
     cmd.args([
-        "-app", "730",
-        "-depot", "0",
-        "-username", &username,
-        "-password", &password,
+        "-app",
+        "730",
+        "-depot",
+        "0",
+        "-username",
+        &username,
+        "-password",
+        &password,
         "-remember-password",
     ])
     .stdin(Stdio::piped())
@@ -453,7 +461,9 @@ pub async fn accounts_verify_custom(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let child_handle = Arc::new(AsyncMutex::new(Some(child)));
-    AUTH_HANDLES.lock().insert(username.clone(), child_handle.clone());
+    AUTH_HANDLES
+        .lock()
+        .insert(username.clone(), child_handle.clone());
 
     // Merge stdout and stderr into a single channel, same pattern as download/mod.rs
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
@@ -464,7 +474,9 @@ pub async fn accounts_verify_custom(
             let mut buf = [0u8; 1024];
             let mut current_line = String::new();
             while let Ok(n) = out.read(&mut buf).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 let chunk = String::from_utf8_lossy(&buf[..n]);
                 for c in chunk.chars() {
                     if c == '\n' {
@@ -543,7 +555,9 @@ pub async fn accounts_verify_custom(
             let mut reader = tokio::io::BufReader::new(&mut err);
             let mut line = String::new();
             while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 let trimmed = line.trim().to_string();
                 if !trimmed.is_empty() {
                     let _ = tx.send(trimmed).await;
@@ -645,7 +659,9 @@ pub async fn accounts_verify_custom(
                     app.emit("auth://require_app_confirm", &username_clone).ok();
                     prompted = true;
                     // Don't break — keep reading
-                } else if (lower.starts_with("logging") && lower.contains("done!") && lower.contains("steam3"))
+                } else if (lower.starts_with("logging")
+                    && lower.contains("done!")
+                    && lower.contains("steam3"))
                     || lower.contains("got appinfo")
                     || lower.contains("depot 0 not found")
                 {
@@ -681,10 +697,7 @@ pub async fn accounts_verify_custom(
 }
 
 #[command]
-pub async fn accounts_submit_2fa(
-    username: String,
-    code: String,
-) -> Result<(), String> {
+pub async fn accounts_submit_2fa(username: String, code: String) -> Result<(), String> {
     let child_opt = AUTH_HANDLES.lock().get(&username).cloned();
     if let Some(child_holder) = child_opt {
         let mut child_guard = child_holder.lock().await;

@@ -218,8 +218,8 @@ fn dir_has_files(dir: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_dir_has_files() {

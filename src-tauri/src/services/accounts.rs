@@ -35,8 +35,7 @@ const BUILTIN_ACCOUNT_BUNDLE: &str = concat!(
     "MvUMM5g03SarxUoZf1dhECB0KwsfEZEjRWsBGSD2aO/8ZsUaDOdf6ITjwscsB/bp5yQLRk7PagyfJdBhIiNF2lRoiVJ9Y7DZlJSc7/qAV1eq8z3d2C/VE4djAg9lyQr4Ggde+fYsztziOL7NEQ8JKzoOISS9oIg="
 );
 
-#[derive(Debug, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Deserialize, Default)]
 struct BuiltinAccountsBundle {
     download: Vec<(String, String)>,
     parser: (String, String),
@@ -167,4 +166,3 @@ fn load_builtin_bundle() -> Result<BuiltinAccountsBundle, String> {
         .map_err(|e| e.to_string())?;
     serde_json::from_slice(&plaintext).map_err(|e| e.to_string())
 }
-

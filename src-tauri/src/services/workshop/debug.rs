@@ -33,14 +33,7 @@ fn log() -> &'static Mutex<Vec<DebugEntry>> {
     LOG.get_or_init(|| Mutex::new(Vec::with_capacity(MAX_ENTRIES)))
 }
 
-pub fn record(
-    kind: &str,
-    url: &str,
-    status: u16,
-    elapsed_ms: u64,
-    html: &str,
-    items_parsed: u32,
-) {
+pub fn record(kind: &str, url: &str, status: u16, elapsed_ms: u64, html: &str, items_parsed: u32) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())

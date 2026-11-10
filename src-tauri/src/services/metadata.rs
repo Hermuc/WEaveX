@@ -150,7 +150,7 @@ mod tests {
                 "tags": []
             }
         });
-        
+
         assert!(is_metadata_complete(&cached, "123"));
         assert!(!is_metadata_complete(&cached, "456"));
         assert!(!is_metadata_complete(&cached, "999"));

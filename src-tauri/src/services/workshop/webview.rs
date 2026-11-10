@@ -179,7 +179,12 @@ impl SteamWebview {
     ///
     /// When `force` is true the existing session check is skipped and the
     /// login form is always submitted — useful for manual re-login.
-    pub async fn auto_login(&self, username: &str, password: &str, force: bool) -> Result<bool, String> {
+    pub async fn auto_login(
+        &self,
+        username: &str,
+        password: &str,
+        force: bool,
+    ) -> Result<bool, String> {
         let _g = self.lock.lock().await;
         self.ensure_window().map_err(|e| e.to_string())?;
 

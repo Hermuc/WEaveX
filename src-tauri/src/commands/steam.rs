@@ -4,7 +4,8 @@ use crate::commands::AppStateHandle;
 use crate::workshop::SteamAccount;
 
 use tauri::Emitter;
-static STEAM_LOGIN_POLLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static STEAM_LOGIN_POLLING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
 pub async fn steam_login_show(state: AppStateHandle<'_>) -> Result<(), String> {
@@ -22,13 +23,13 @@ pub async fn steam_login_show(state: AppStateHandle<'_>) -> Result<(), String> {
         tokio::spawn(async move {
             for _ in 0..180 {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                if steam_webview.is_logged_in().await
-                    && steam_webview.sync_cookies().await.is_ok() {
-                        workshop.clear_caches();
-                        let _ = steam_webview.hide().await;
-                        let _ = app_handle.emit("steam-login-success", ());
-                        break;
-                    }
+                if steam_webview.is_logged_in().await && steam_webview.sync_cookies().await.is_ok()
+                {
+                    workshop.clear_caches();
+                    let _ = steam_webview.hide().await;
+                    let _ = app_handle.emit("steam-login-success", ());
+                    break;
+                }
             }
             STEAM_LOGIN_POLLING.store(false, std::sync::atomic::Ordering::SeqCst);
         });
@@ -50,11 +51,7 @@ pub async fn steam_parser_show(state: AppStateHandle<'_>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn steam_login_hide(state: AppStateHandle<'_>) -> Result<(), String> {
-    state
-        .steam_webview
-        .hide()
-        .await
-        .map_err(|e| e.to_string())
+    state.steam_webview.hide().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -142,10 +139,7 @@ pub async fn steam_login_fill(
 }
 
 #[tauri::command]
-pub async fn steam_login_fill_2fa(
-    state: AppStateHandle<'_>,
-    code: &str,
-) -> Result<(), String> {
+pub async fn steam_login_fill_2fa(state: AppStateHandle<'_>, code: &str) -> Result<(), String> {
     state.steam_webview.login_fill_2fa(code).await
 }
 
@@ -156,7 +150,11 @@ pub async fn steam_login_switch_to_code(state: AppStateHandle<'_>) -> Result<(),
 
 #[tauri::command]
 pub async fn steam_login_prepare(state: AppStateHandle<'_>) -> Result<(), String> {
-    state.steam_webview.prepare_login().await.map_err(|e| e.to_string())
+    state
+        .steam_webview
+        .prepare_login()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -169,26 +167,47 @@ pub struct QrBeginResponse {
 #[tauri::command]
 pub async fn steam_qr_begin() -> Result<QrBeginResponse, String> {
     let client = reqwest::Client::new();
-    let res = client.post("https://api.steampowered.com/IAuthenticationService/BeginAuthSessionViaQR/v1/")
+    let res = client
+        .post("https://api.steampowered.com/IAuthenticationService/BeginAuthSessionViaQR/v1/")
         .form(&[("device_friendly_name", "WEave"), ("platform_type", "2")])
         .send()
         .await
         .map_err(|e| e.to_string())?;
 
     let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-    
-    let response = json.get("response").ok_or("No response field")?;
-    let client_id = response.get("client_id").and_then(|v| v.as_str()).ok_or("No client_id")?.to_string();
-    let challenge_url = response.get("challenge_url").and_then(|v| v.as_str()).ok_or("No challenge_url")?.to_string();
-    let request_id = response.get("request_id").and_then(|v| v.as_str()).ok_or("No request_id")?.to_string();
 
-    Ok(QrBeginResponse { client_id, challenge_url, request_id })
+    let response = json.get("response").ok_or("No response field")?;
+    let client_id = response
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .ok_or("No client_id")?
+        .to_string();
+    let challenge_url = response
+        .get("challenge_url")
+        .and_then(|v| v.as_str())
+        .ok_or("No challenge_url")?
+        .to_string();
+    let request_id = response
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .ok_or("No request_id")?
+        .to_string();
+
+    Ok(QrBeginResponse {
+        client_id,
+        challenge_url,
+        request_id,
+    })
 }
 
 #[tauri::command]
-pub async fn steam_qr_poll(client_id: String, request_id: String) -> Result<serde_json::Value, String> {
+pub async fn steam_qr_poll(
+    client_id: String,
+    request_id: String,
+) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
-    let res = client.post("https://api.steampowered.com/IAuthenticationService/PollAuthSessionStatus/v1/")
+    let res = client
+        .post("https://api.steampowered.com/IAuthenticationService/PollAuthSessionStatus/v1/")
         .form(&[("client_id", &client_id), ("request_id", &request_id)])
         .send()
         .await
@@ -205,15 +224,19 @@ pub async fn steam_qr_login_finalize(
     _refresh_token: String,
 ) -> Result<(), String> {
     let parts: Vec<&str> = access_token.split('.').collect();
-    if parts.len() < 2 { return Err("Invalid access token".into()); }
-    
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    let payload = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|e| e.to_string())?;
+    if parts.len() < 2 {
+        return Err("Invalid access token".into());
+    }
+
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    let payload = URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .map_err(|e| e.to_string())?;
     let jwt: serde_json::Value = serde_json::from_slice(&payload).map_err(|e| e.to_string())?;
-    
+
     let steamid = jwt["sub"].as_str().ok_or("No sub in JWT")?;
     let steam_login_secure = format!("{}%7C%7C{}", steamid, access_token);
-    
+
     use rand::RngExt;
     let sessionid: String = rand::rng()
         .sample_iter(&rand::distr::Alphanumeric)
@@ -221,11 +244,14 @@ pub async fn steam_qr_login_finalize(
         .map(char::from)
         .collect::<String>()
         .to_lowercase();
-        
-    let Some(w) = state.app_handle.get_webview_window(crate::workshop::webview::LABEL) else {
+
+    let Some(w) = state
+        .app_handle
+        .get_webview_window(crate::workshop::webview::LABEL)
+    else {
         return Err("No webview window".into());
     };
-    
+
     let script = format!(
         r#"
         document.cookie = "steamLoginSecure={}; path=/; domain=steamcommunity.com; secure; samesite=none; max-age=31536000";
@@ -235,20 +261,23 @@ pub async fn steam_qr_login_finalize(
         steam_login_secure, sessionid
     );
     w.eval(&script).map_err(|e| e.to_string())?;
-    
+
     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-    
+
     let _ = state.steam_webview.sync_cookies().await;
     state.workshop.clear_caches();
-    
+
     let _ = state.app_handle.emit("steam-login-success", ());
-    
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<String>, String> {
-    let Some(w) = state.app_handle.get_webview_window(crate::workshop::webview::LABEL) else {
+    let Some(w) = state
+        .app_handle
+        .get_webview_window(crate::workshop::webview::LABEL)
+    else {
         return Ok(None);
     };
 
@@ -297,9 +326,9 @@ pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<
         })();
     "#;
     w.eval(script).ok();
-    
+
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    
+
     if let Ok(url) = w.url() {
         if let Some(fragment) = url.fragment() {
             if fragment.starts_with("WE_ERR:") {
@@ -310,6 +339,6 @@ pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<
             }
         }
     }
-    
+
     Ok(None)
 }

@@ -15,11 +15,7 @@ pub fn config_get(state: AppStateHandle<'_>, path: String) -> Option<Value> {
 }
 
 #[command]
-pub fn config_set(
-    state: AppStateHandle<'_>,
-    path: String,
-    value: Value,
-) -> Result<(), String> {
+pub fn config_set(state: AppStateHandle<'_>, path: String, value: Value) -> Result<(), String> {
     state.settings.read().set(&path, value).map_err(map_err)
 }
 

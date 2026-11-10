@@ -77,9 +77,8 @@ impl WEaveLogger {
                             {
                                 new_file.write_all(content_to_keep.as_bytes()).ok();
                                 // We must reopen in append mode for future writes
-                                if let Ok(append_file) = OpenOptions::new()
-                                    .append(true)
-                                    .open(&log_path)
+                                if let Ok(append_file) =
+                                    OpenOptions::new().append(true).open(&log_path)
                                 {
                                     *file_guard = Some(append_file);
                                 } else {
@@ -113,12 +112,13 @@ impl log::Log for WEaveLogger {
         let target = metadata.target();
 
         // Filter out noisy or sensitive debug targets
-        if target.starts_with("selectors::matching") ||
-           target.starts_with("html5ever::tokenizer") ||
-           target.starts_with("html5ever::tree_builder") ||
-           target.starts_with("cookie_store") ||
-           target.contains("parse") ||
-           target.contains("parser") {
+        if target.starts_with("selectors::matching")
+            || target.starts_with("html5ever::tokenizer")
+            || target.starts_with("html5ever::tree_builder")
+            || target.starts_with("cookie_store")
+            || target.contains("parse")
+            || target.contains("parser")
+        {
             return false;
         }
 

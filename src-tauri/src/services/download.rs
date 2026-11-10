@@ -98,7 +98,6 @@ impl DownloadManager {
             .join("myprojects")
             .join(pubfileid);
 
-
         let status = TaskStatus {
             pubfileid: pubfileid.into(),
             status: "Starting…".into(),
@@ -122,9 +121,13 @@ impl DownloadManager {
             let pubfileid = pubfileid_owned;
             let initial_creds = accounts.credentials(starting_index);
             let is_custom = initial_creds.is_custom;
-            
+
             let mut current_index = if is_custom { starting_index } else { 0 };
-            let total_accounts = if is_custom { 1 } else { std::cmp::max(1, accounts.builtin_count()) };
+            let total_accounts = if is_custom {
+                1
+            } else {
+                std::cmp::max(1, accounts.builtin_count())
+            };
             let mut attempt = 0;
 
             loop {
@@ -215,7 +218,9 @@ impl DownloadManager {
                                 } else {
                                     current_line.push(c);
                                     let lower = current_line.to_lowercase();
-                                    if lower.contains("enter your 2-factor auth code") || lower.contains("auth code sent to your email") {
+                                    if lower.contains("enter your 2-factor auth code")
+                                        || lower.contains("auth code sent to your email")
+                                    {
                                         let line = std::mem::take(&mut current_line);
                                         let _ = tx.send(format!("OUT:{}", line)).await;
                                     }
@@ -250,13 +255,16 @@ impl DownloadManager {
                     let current_timeout = if !download_started {
                         let elapsed = start_time.elapsed();
                         if elapsed >= std::time::Duration::from_secs(15) {
-                            log::warn!("15-second timeout reached before download started for {}", pubfileid);
+                            log::warn!(
+                                "15-second timeout reached before download started for {}",
+                                pubfileid
+                            );
                             connection_failed = true;
                             break;
                         }
                         std::time::Duration::from_secs(15).saturating_sub(elapsed)
                     } else {
-                        // Once download starts, there is no inactivity timeout. 
+                        // Once download starts, there is no inactivity timeout.
                         // The user can manually cancel large downloads if needed.
                         std::time::Duration::from_secs(86400 * 365)
                     };
@@ -272,18 +280,24 @@ impl DownloadManager {
                                     .and_then(|c| c.get(1))
                                     .and_then(|m| m.as_str().replace(',', ".").parse::<f32>().ok())
                                     .map(|p| p.clamp(0.0, 100.0));
-                                
+
                                 if progress.is_some() {
                                     download_started = true;
                                 }
-                                
+
                                 let lower = cleaned.to_lowercase();
-                                if (lower.contains("enter") && lower.contains("code")) || lower.contains("auth code") || lower.contains("2 factor") || lower.contains("authenticator app") {
+                                if (lower.contains("enter") && lower.contains("code"))
+                                    || lower.contains("auth code")
+                                    || lower.contains("2 factor")
+                                    || lower.contains("authenticator app")
+                                {
                                     download_started = true; // prevent timeout
                                     app.emit("download://require_2fa", pubfileid.clone()).ok();
-                                } else if lower.contains("waiting for steam guard app confirmation") {
+                                } else if lower.contains("waiting for steam guard app confirmation")
+                                {
                                     download_started = true; // prevent timeout
-                                    app.emit("download://require_app_confirm", pubfileid.clone()).ok();
+                                    app.emit("download://require_app_confirm", pubfileid.clone())
+                                        .ok();
                                 }
                                 let status = TaskStatus {
                                     pubfileid: pubfileid.clone(),
@@ -305,7 +319,10 @@ impl DownloadManager {
                         Ok(None) => break, // EOF
                         Err(_) => {
                             if !download_started {
-                                log::warn!("DepotDownloader timed out before starting for {}", pubfileid);
+                                log::warn!(
+                                    "DepotDownloader timed out before starting for {}",
+                                    pubfileid
+                                );
                                 connection_failed = true;
                             }
                             break;
@@ -344,7 +361,8 @@ impl DownloadManager {
                             pubfileid: pubfileid.clone(),
                             success: false,
                         },
-                    ).ok();
+                    )
+                    .ok();
                     cancelled.lock().remove(&pubfileid);
                     tasks.lock().remove(&pubfileid);
                     return;
@@ -369,13 +387,18 @@ impl DownloadManager {
                             pubfileid: pubfileid.clone(),
                             success: true,
                         },
-                    ).ok();
+                    )
+                    .ok();
                     tasks.lock().remove(&pubfileid);
                     return;
                 }
 
                 attempt += 1;
-                current_index = if is_custom { starting_index } else { (current_index + 1) % total_accounts };
+                current_index = if is_custom {
+                    starting_index
+                } else {
+                    (current_index + 1) % total_accounts
+                };
 
                 if attempt >= total_accounts && !infinite_retry {
                     let status_text = if !stderr_tail.is_empty() {
@@ -397,12 +420,17 @@ impl DownloadManager {
                             pubfileid: pubfileid.clone(),
                             success: false,
                         },
-                    ).ok();
+                    )
+                    .ok();
                     tasks.lock().remove(&pubfileid);
                     return;
                 }
 
-                log::warn!("Retrying {} with account index {}...", pubfileid, current_index);
+                log::warn!(
+                    "Retrying {} with account index {}...",
+                    pubfileid,
+                    current_index
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             }
         });
@@ -498,8 +526,8 @@ fn dir_has_files(dir: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_dir_has_files() {

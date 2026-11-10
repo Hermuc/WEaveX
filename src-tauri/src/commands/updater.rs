@@ -20,6 +20,9 @@ pub fn updater_skip_version(state: AppStateHandle<'_>, version: String) {
     state
         .settings
         .read()
-        .set("general.behavior.skip_version", serde_json::Value::String(version))
+        .set(
+            "general.behavior.skip_version",
+            serde_json::Value::String(version),
+        )
         .ok();
 }

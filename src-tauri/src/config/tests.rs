@@ -146,7 +146,7 @@ mod settings_tests {
         assert_eq!(saved_geom["y"].as_i64().unwrap(), 200);
         assert_eq!(saved_geom["width"].as_i64().unwrap(), 1920);
         assert_eq!(saved_geom["height"].as_i64().unwrap(), 1080);
-        assert_eq!(saved_geom["is_maximized"].as_bool().unwrap(), true);
+        assert!(saved_geom["is_maximized"].as_bool().unwrap());
     }
 
     #[test]
