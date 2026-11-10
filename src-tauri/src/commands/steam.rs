@@ -1,14 +1,13 @@
-use std::sync::Arc;
-use tauri::{State, Manager};
+use tauri::Manager;
 
-use crate::app_state::AppState;
+use crate::commands::AppStateHandle;
 use crate::workshop::SteamAccount;
 
 use tauri::Emitter;
 static STEAM_LOGIN_POLLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
-pub async fn steam_login_show(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn steam_login_show(state: AppStateHandle<'_>) -> Result<(), String> {
     state
         .steam_webview
         .show_login()
@@ -41,7 +40,7 @@ pub async fn steam_login_show(state: State<'_, Arc<AppState>>) -> Result<(), Str
 /// Just opens the parser webview window without starting any login-polling loop.
 /// Safe to call when already logged in — will not fire "steam-login-success".
 #[tauri::command]
-pub async fn steam_parser_show(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn steam_parser_show(state: AppStateHandle<'_>) -> Result<(), String> {
     state
         .steam_webview
         .show_login()
@@ -50,7 +49,7 @@ pub async fn steam_parser_show(state: State<'_, Arc<AppState>>) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn steam_login_hide(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn steam_login_hide(state: AppStateHandle<'_>) -> Result<(), String> {
     state
         .steam_webview
         .hide()
@@ -59,7 +58,7 @@ pub async fn steam_login_hide(state: State<'_, Arc<AppState>>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn steam_sync_cookies(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
+pub async fn steam_sync_cookies(state: AppStateHandle<'_>) -> Result<usize, String> {
     let n = state.steam_webview.sync_cookies().await?;
     // Clear page cache so that subsequent requests go through with the new
     // cookies and don't return stale anonymous pages.
@@ -68,7 +67,7 @@ pub async fn steam_sync_cookies(state: State<'_, Arc<AppState>>) -> Result<usize
 }
 
 #[tauri::command]
-pub async fn steam_is_logged_in(state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+pub async fn steam_is_logged_in(state: AppStateHandle<'_>) -> Result<bool, String> {
     Ok(state.steam_webview.is_logged_in().await)
 }
 
@@ -80,7 +79,7 @@ pub async fn steam_is_logged_in(state: State<'_, Arc<AppState>>) -> Result<bool,
 /// whatever is selected in the Settings dialog.
 #[tauri::command]
 pub async fn steam_current_account(
-    state: State<'_, Arc<AppState>>,
+    state: AppStateHandle<'_>,
 ) -> Result<Option<SteamAccount>, String> {
     // Make sure whatever cookies are in the webview profile are
     // reflected in the reqwest jar before we query Steam.
@@ -97,7 +96,7 @@ pub async fn steam_current_account(
 /// fresh login is always attempted.
 #[tauri::command]
 pub async fn steam_auto_login(
-    state: State<'_, Arc<AppState>>,
+    state: AppStateHandle<'_>,
     account_index: Option<usize>,
     force: Option<bool>,
 ) -> Result<bool, String> {
@@ -135,7 +134,7 @@ pub async fn steam_auto_login(
 
 #[tauri::command]
 pub async fn steam_login_fill(
-    state: tauri::State<'_, std::sync::Arc<crate::app_state::AppState>>,
+    state: AppStateHandle<'_>,
     username: &str,
     password: &str,
 ) -> Result<(), String> {
@@ -144,19 +143,19 @@ pub async fn steam_login_fill(
 
 #[tauri::command]
 pub async fn steam_login_fill_2fa(
-    state: tauri::State<'_, std::sync::Arc<crate::app_state::AppState>>,
+    state: AppStateHandle<'_>,
     code: &str,
 ) -> Result<(), String> {
     state.steam_webview.login_fill_2fa(code).await
 }
 
 #[tauri::command]
-pub async fn steam_login_switch_to_code(state: tauri::State<'_, std::sync::Arc<crate::app_state::AppState>>) -> Result<(), String> {
+pub async fn steam_login_switch_to_code(state: AppStateHandle<'_>) -> Result<(), String> {
     state.steam_webview.login_switch_to_code().await
 }
 
 #[tauri::command]
-pub async fn steam_login_prepare(state: tauri::State<'_, std::sync::Arc<crate::app_state::AppState>>) -> Result<(), String> {
+pub async fn steam_login_prepare(state: AppStateHandle<'_>) -> Result<(), String> {
     state.steam_webview.prepare_login().await.map_err(|e| e.to_string())
 }
 
@@ -201,7 +200,7 @@ pub async fn steam_qr_poll(client_id: String, request_id: String) -> Result<serd
 
 #[tauri::command]
 pub async fn steam_qr_login_finalize(
-    state: tauri::State<'_, std::sync::Arc<crate::app_state::AppState>>,
+    state: AppStateHandle<'_>,
     access_token: String,
     _refresh_token: String,
 ) -> Result<(), String> {
@@ -248,7 +247,7 @@ pub async fn steam_qr_login_finalize(
 }
 
 #[tauri::command]
-pub async fn steam_login_poll_error(state: tauri::State<'_, std::sync::Arc<crate::app_state::AppState>>) -> Result<Option<String>, String> {
+pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<String>, String> {
     let Some(w) = state.app_handle.get_webview_window(crate::workshop::webview::LABEL) else {
         return Ok(None);
     };

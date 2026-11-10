@@ -1,13 +1,17 @@
 //! Thin helpers around the wallpaper metadata section of the config file.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 
-use crate::app_state::AppState;
+use crate::config::MetadataService;
+use crate::we_client::WallpaperEngineClient;
+use crate::workshop::WorkshopClient;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -37,9 +41,15 @@ pub struct MetadataInitProgress {
 /// non-trivial metadata cached in the config file, fetch the workshop
 /// page and persist the parsed metadata. Mirrors the original Python
 /// `MetadataBatchInitializer`.
-pub async fn batch_initialize_metadata(state: Arc<AppState>) -> anyhow::Result<u32> {
-    let installed = state.we_client.read().installed_wallpapers();
-    let cached = state.metadata.read().get_all();
+pub async fn batch_initialize_metadata(
+    we_client: &Arc<RwLock<WallpaperEngineClient>>,
+    metadata: &Arc<RwLock<MetadataService>>,
+    workshop: &Arc<WorkshopClient>,
+    app_handle: &AppHandle,
+    cancel: &Arc<AtomicBool>,
+) -> anyhow::Result<u32> {
+    let installed = we_client.read().installed_wallpapers();
+    let cached = metadata.read().get_all();
 
     let pending: Vec<String> = installed
         .iter()
@@ -50,15 +60,14 @@ pub async fn batch_initialize_metadata(state: Arc<AppState>) -> anyhow::Result<u
     let total = pending.len() as u32;
     let mut count: u32 = 0;
 
-    state.metadata_init_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+    cancel.store(false, std::sync::atomic::Ordering::SeqCst);
 
     for (index, pubfileid) in pending.iter().enumerate() {
-        if state.metadata_init_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             log::info!("Metadata initialization cancelled by user");
             break;
         }
 
-        let workshop = state.workshop.clone();
         match workshop.item_details(pubfileid).await {
             Ok(item) => {
                 let value = serde_json::to_value(WallpaperMetadata {
@@ -79,7 +88,7 @@ pub async fn batch_initialize_metadata(state: Arc<AppState>) -> anyhow::Result<u
                 })
                 .unwrap_or(Value::Null);
                 if !value.is_null() {
-                    state.metadata.read().set_item(&item.pubfileid, value);
+                    metadata.read().set_item(&item.pubfileid, value);
                     count += 1;
                 }
             }
@@ -94,7 +103,7 @@ pub async fn batch_initialize_metadata(state: Arc<AppState>) -> anyhow::Result<u
 
         // Emit progress event
         let current = (index + 1) as u32;
-        let _ = state.app_handle.emit(
+        let _ = app_handle.emit(
             "metadata-init-progress",
             MetadataInitProgress { current, total },
         );

@@ -185,9 +185,15 @@ pub fn app_show_main_window(app: AppHandle) {
 /// derived fields (tags, posted/updated date, file size, description).
 #[command]
 pub async fn app_init_metadata(state: AppStateHandle<'_>) -> Result<u32, String> {
-    batch_initialize_metadata(state.inner().clone())
-        .await
-        .map_err(|e| e.to_string())
+    batch_initialize_metadata(
+        &state.we_client,
+        &state.metadata,
+        &state.workshop,
+        &state.app_handle,
+        &state.metadata_init_cancel,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Cancel the metadata batch initializer.
