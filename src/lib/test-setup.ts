@@ -77,9 +77,16 @@ afterEach(() => {
   console.error = originalError;
 });
 
-// Parse src/index.css to support computed styles in JSDOM tests
-import fs from "node:fs";
-import path from "node:path";
+// Parse src/index.css to support computed styles in JSDOM tests.
+// NOTE: under Vite 8 the `node:` prefix is externalized for the browser/jsdom
+// environment, so a static `import fs from "node:fs"` fails with
+// "No such built-in module: node:". Resolve the real builtins at runtime via
+// process.getBuiltinModule (Node >= 20.16 / 22.3) instead.
+const nodeBuiltins = (
+  process as unknown as { getBuiltinModule(id: string): any }
+).getBuiltinModule.bind(process);
+const fs = nodeBuiltins("node:fs");
+const path = nodeBuiltins("node:path");
 
 const cssPath = path.resolve(__dirname, "../index.css");
 const parsedRules: { selector: string; variables: Record<string, string> }[] =
