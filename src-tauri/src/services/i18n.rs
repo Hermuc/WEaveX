@@ -18,7 +18,6 @@ impl I18nService {
         // Keep in sync with src/i18n/languages.ts (frontend single source).
         vec![
             ("en".into(), "English".into()),
-            ("ru".into(), "Русский".into()),
             ("zh".into(), "简体中文".into()),
         ]
     }

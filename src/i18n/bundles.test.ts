@@ -4,7 +4,6 @@ import { describe, it, expect } from "vitest";
 // not i18next itself), so this exercises the actual resource bundles.
 import i18n from "./index";
 import en from "./locales/en";
-import ru from "./locales/ru";
 import zh from "./locales/zh";
 
 type Tree = { [k: string]: string | Tree };
@@ -26,12 +25,10 @@ const t = i18n.t as unknown as (key: string) => string;
 
 const zhKeys = leafKeys(zh as unknown as Tree);
 const enKeys = leafKeys(en as unknown as Tree);
-const ruKeys = leafKeys(ru as unknown as Tree);
 
 describe("i18n resource bundles", () => {
-  it("ships the same leaf-key set for en, ru and zh", () => {
+  it("ships the same leaf-key set for en and zh", () => {
     expect([...zhKeys].sort()).toEqual([...enKeys].sort());
-    expect([...ruKeys].sort()).toEqual([...enKeys].sort());
   });
 
   it("returns Chinese strings (not the English fallback) for every zh key", async () => {
@@ -48,12 +45,12 @@ describe("i18n resource bundles", () => {
     expect(notChinese).toEqual([]);
   });
 
-  it("switches between ru and zh at runtime", async () => {
-    await i18n.changeLanguage("ru");
-    const ruValue = t("settings.language");
+  it("switches between en and zh at runtime", async () => {
+    await i18n.changeLanguage("en");
+    const enValue = t("settings.language");
     await i18n.changeLanguage("zh");
     const zhValue = t("settings.language");
-    expect(zhValue).not.toBe(ruValue);
+    expect(zhValue).not.toBe(enValue);
     expect(zhValue).toBe(zh.settings.language);
   });
 });

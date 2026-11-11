@@ -9,14 +9,13 @@ import {
 describe("normalizeLanguage", () => {
   it("matches exact supported codes", () => {
     expect(normalizeLanguage("en")).toBe("en");
-    expect(normalizeLanguage("ru")).toBe("ru");
     expect(normalizeLanguage("zh")).toBe("zh");
   });
 
   it("is case-insensitive and treats underscores as dashes", () => {
     expect(normalizeLanguage("ZH")).toBe("zh");
     expect(normalizeLanguage("zh_CN")).toBe("zh");
-    expect(normalizeLanguage("RU-ru")).toBe("ru");
+    expect(normalizeLanguage("EN-us")).toBe("en");
   });
 
   it("falls back to the primary subtag", () => {
@@ -29,6 +28,8 @@ describe("normalizeLanguage", () => {
   it("returns null for unsupported or empty input", () => {
     expect(normalizeLanguage("de-DE")).toBeNull();
     expect(normalizeLanguage("fr")).toBeNull();
+    // Russian used to ship; it was dropped, so it must now be rejected.
+    expect(normalizeLanguage("ru")).toBeNull();
     expect(normalizeLanguage("")).toBeNull();
     expect(normalizeLanguage(null)).toBeNull();
     expect(normalizeLanguage(undefined)).toBeNull();
@@ -38,7 +39,7 @@ describe("normalizeLanguage", () => {
 describe("detectSystemLanguage", () => {
   it("picks the first supported preference", () => {
     expect(detectSystemLanguage(["zh-CN", "en-US"])).toBe("zh");
-    expect(detectSystemLanguage(["de-DE", "ru-RU"])).toBe("ru");
+    expect(detectSystemLanguage(["en-GB", "zh-CN"])).toBe("en");
   });
 
   it("skips unsupported languages and keeps searching", () => {
@@ -59,7 +60,7 @@ describe("detectSystemLanguage", () => {
     // Simulates the bootstrap flow: OS locale first, then browser fallbacks.
     expect(detectSystemLanguage(["zh-CN", "en-US"])).toBe("zh");
     // An unsupported OS locale must not block the browser fallback.
-    expect(detectSystemLanguage(["de-DE", "ru-RU"])).toBe("ru");
+    expect(detectSystemLanguage(["de-DE", "zh-CN"])).toBe("zh");
   });
 });
 

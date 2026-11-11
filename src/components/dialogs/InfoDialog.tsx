@@ -196,24 +196,24 @@ export default function InfoDialog({
             </div>
             <div className="flex flex-col">
               <FaqItem 
-                q={t("faq.download_issues_q") || "Что делать если обои не скачиваются?"} 
-                a={t("faq.download_issues_a") || "Попробовать снова, возможно немного подождать.\nМожеть быть такое, что пароли от системных аккаунтов для загрузки устарели, в таком случае можно:\n1) Добавить свой личный аккаунт без Steam Guard с копией Wallpaper Engine (Вкладка аккаунты в настройках) (Но зачем вам это, не понятно)\n2) Купить на различных площадках оффлайн-активации Wallpaper Engine без Steam Guard и добавить по методу выше (Стоят очень дёшего)\n3) Написать Issue в репозиторий на GitHub и я постараюсь оперативно обновить рабочие аккаунты"} 
+                q={t("faq.download_issues_q") || "What to do if wallpapers will not download?"} 
+                a={t("faq.download_issues_a") || "Try again, maybe wait a little.\nIt is also possible that the passwords for the system download accounts have expired. In that case you can:\n1) Add your own account with a copy of Wallpaper Engine in the settings\n2) Buy an offline activation of Wallpaper Engine and add it the same way\n3) Open an Issue on GitHub and I will try to update the working accounts"} 
               />
               <FaqItem 
-                q={t("faq.login_issues_q") || "В приложении не загружаются обои или возникает ошибка логина Steam"} 
-                a={t("faq.login_issues_a") || "Если вам не нужен 18+ контент, то можете не беспокоиться об этом и просто игнорировать.\n\nВ ином случае, откройте папку с данными (кнопка 'Open Data Folder' в окне About) и удалите папку «EBWebView» (это сбросит кэш встроенного браузера). Перезапустите программу.\n\nЕсли проблема не решилась/не решается долгое время, скорее всего проблемы с системным аккаунтом парсера, попробуйте указать свой собственный аккаунт Steam в настройках парсера (Accounts -> Custom account). Вы можете использовать любой аккаунт (пустышку), главное чтобы в настройках вашего аккаунта не было поставлено ограничений на 18+ контент.\n\nПри необходимости в будущем будет создано больше системных аккаунтов с автоматической выборкой."} 
+                q={t("faq.login_issues_q") || "Wallpapers do not load in the app, or a Steam login error appears"} 
+                a={t("faq.login_issues_a") || "If you do not need 18+ content you can ignore this.\n\nOtherwise, open the data folder (the 'Open Data Folder' button in the About window) and delete the 'EBWebView' folder (this clears the embedded browser cache). Restart the app.\n\nIf the problem persists, it is most likely an issue with the system parser account; try setting your own Steam account in the parser settings (Accounts -> Custom account). Any account works as long as it does not have the 18+ content restriction enabled."} 
               />
               <FaqItem 
-                q={t("faq.extract_q") || "Почему у некоторых загруженных обоев не работает кнопка 'Extract'?"} 
-                a={t("faq.extract_a") || "Не все обои в Workshop являются полноценными проектами (с файлом project.json). Существуют видео-обои (MP4) или веб-обои (HTML). Они уже готовы к использованию, и их не нужно (и технически невозможно) распаковывать как проекты Wallpaper Engine."} 
+                q={t("faq.extract_q") || "Why does the 'Extract' button not work for some downloaded wallpapers?"} 
+                a={t("faq.extract_a") || "Not every Workshop item is a full project (with a project.json file). There are video wallpapers (MP4) and web wallpapers (HTML). They are already usable and cannot (and need not) be unpacked as Wallpaper Engine projects."} 
               />
               <FaqItem 
-                q={t("faq.storage_q") || "Где хранятся скачанные обои?"} 
-                a={t("faq.storage_a") || "Все скачанные обои сохраняются напрямую в корневую папку Wallpaper Engine в директорию `projects/myprojects`. Они сразу же становятся доступны в официальном приложении без дополнительных действий с вашей стороны."} 
+                q={t("faq.storage_q") || "Where are downloaded wallpapers stored?"} 
+                a={t("faq.storage_a") || "All downloaded wallpapers are saved directly to the root Wallpaper Engine folder, in the 'projects/myprojects' directory. They become available in the official app immediately."} 
               />
               <FaqItem 
-                q={t("faq.visibility_q") || "Обои скачиваются, но в оригинальном приложении их не видно"} 
-                a={t("faq.visibility_a") || "Убедитесь, что в настройках (System & Integration) вы указали правильный путь до папки Wallpaper Engine. Путь должен указывать на корневую папку, где лежат исполняемые файлы (wallpaper32.exe / wallpaper64.exe)."} 
+                q={t("faq.visibility_q") || "Wallpapers download but are not visible in the original app"} 
+                a={t("faq.visibility_a") || "Make sure the Settings point at the correct Wallpaper Engine folder. The path must point at the root folder that contains wallpaper32.exe / wallpaper64.exe."} 
               />
             </div>
           </div>

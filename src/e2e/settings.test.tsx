@@ -17,7 +17,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
       weDirectory: "C:/MockDirectory",
       availableLanguages: [
         { code: "en", label: "English" },
-        { code: "ru", label: "Русский" },
+        { code: "zh", label: "简体中文" },
       ],
       accounts: [
         { index: 0, username: "AutoAccount", is_custom: false },
@@ -39,7 +39,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
   it("T1.3.1 should switch language in general settings", async () => {
     let setLangCalled = false;
     registerCommandMock("config_set", ({ path, value }: any) => {
-      if (path === "settings.general.appearance.language" && value === "ru") {
+      if (path === "settings.general.appearance.language" && value === "zh") {
         setLangCalled = true;
       }
       return null;
@@ -50,7 +50,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     // Renders tabs. The first tab content is rendered.
     const languageSelect = await screen.findByRole("combobox", { name: /language/i });
     await userEvent.click(languageSelect);
-    const option = await screen.findByText("Русский");
+    const option = await screen.findByText("简体中文");
     await userEvent.click(option);
 
     await waitFor(() => {
@@ -58,14 +58,8 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     });
   });
 
-  it("T1.3.1b should switch to Simplified Chinese in general settings", async () => {
-    useAppStore.setState({
-      availableLanguages: [
-        { code: "en", label: "English" },
-        { code: "ru", label: "Русский" },
-        { code: "zh", label: "简体中文" },
-      ],
-    });
+  it("T1.3.1b should switch back to English in general settings", async () => {
+    useAppStore.setState({ language: "zh" });
     let selectedLang: string | null = null;
     registerCommandMock("config_set", ({ path, value }: any) => {
       if (path === "settings.general.appearance.language") {
@@ -78,11 +72,11 @@ describe("Settings Dialog E2E Tests (F3)", () => {
 
     const languageSelect = await screen.findByRole("combobox", { name: /language/i });
     await userEvent.click(languageSelect);
-    const option = await screen.findByText("简体中文");
+    const option = await screen.findByText("English");
     await userEvent.click(option);
 
     await waitFor(() => {
-      expect(selectedLang).toBe("zh");
+      expect(selectedLang).toBe("en");
     });
   });
 

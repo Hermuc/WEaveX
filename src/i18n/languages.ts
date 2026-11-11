@@ -1,7 +1,6 @@
 import type { Resource } from "i18next";
 
 import en from "./locales/en";
-import ru from "./locales/ru";
 import zh from "./locales/zh";
 
 /**
@@ -16,7 +15,6 @@ import zh from "./locales/zh";
  */
 export const LOCALES = [
   { code: "en", label: "English", resource: en },
-  { code: "ru", label: "Русский", resource: ru },
   { code: "zh", label: "简体中文", resource: zh },
 ] as const;
 

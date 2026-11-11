@@ -230,7 +230,7 @@ export default function WorkshopCard({
             )}
           />
 
-          {/* Градиентный оверлей для читаемости текста */}
+          {/* Gradient overlay for text readability */}
           <div
             className={cn(
               "absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-70 transition-opacity duration-300",
@@ -238,7 +238,7 @@ export default function WorkshopCard({
             )}
           />
 
-          {/* Бейджи в верхней части */}
+          {/* Badges at the top */}
           <div className="absolute top-2 left-2 z-2 flex items-center gap-2">
             {item.is_collection && (
               <span className="inline-flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-white ring-1 ring-white/20 backdrop-blur-md transition-all duration-200 group-hover:bg-black/85">
@@ -380,7 +380,7 @@ export default function WorkshopCard({
             </div>
           )}
 
-          {/* Название и автор поверх изображения */}
+          {/* Title and author over the image */}
           {!isDownloading && (
             <div className="absolute inset-x-0 bottom-0 z-1 flex flex-col gap-0.5 px-2.5 pt-6 pr-12 pb-2.5">
               <h3

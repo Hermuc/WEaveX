@@ -18,6 +18,11 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     globals: true,
+    // Pin NODE_ENV for the test run: React only exports `act` in the
+    // development build, and an inherited NODE_ENV=production from the
+    // caller's shell otherwise makes every @testing-library render throw
+    // "React.act is not a function".
+    env: { NODE_ENV: "test" },
     setupFiles: ["./src/lib/test-setup.ts"],
     coverage: {
       provider: "v8",

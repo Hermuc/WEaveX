@@ -114,7 +114,7 @@ describe("Details Panel E2E Tests (F2)", () => {
     let translateCalled = false;
     registerCommandMock("translator_translate", () => {
       translateCalled = true;
-      return "Прекрасный пейзаж";
+      return "美丽的风景";
     });
 
     render(
@@ -136,7 +136,7 @@ describe("Details Panel E2E Tests (F2)", () => {
     await waitFor(() => {
       expect(translateCalled).toBe(true);
     });
-    expect(screen.getByText("Прекрасный пейзаж")).toBeInTheDocument();
+    expect(screen.getByText("美丽的风景")).toBeInTheDocument();
   });
 
   it("T1.2.5 should call onDelete when delete button is clicked and confirmed", async () => {
