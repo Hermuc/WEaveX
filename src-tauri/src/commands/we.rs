@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::command;
 
 use crate::commands::{map_err, AppStateHandle};
-use crate::we_client::{delete_wallpaper_folder, InstalledWallpaper, WallpaperEngineClient};
+use crate::we_client::{InstalledWallpaper, WallpaperEngineClient};
 
 #[command]
 pub fn we_detect() -> Option<String> {
@@ -157,9 +157,6 @@ pub fn we_open(state: AppStateHandle<'_>, show_window: Option<bool>) -> Result<(
 
 #[command]
 pub fn we_delete_wallpaper(state: AppStateHandle<'_>, pubfileid: String) -> Result<(), String> {
-    let Some(projects) = state.we_client.read().projects_path() else {
-        return Err("Wallpaper Engine directory not set".into());
-    };
     // Refuse to delete a wallpaper that's currently being displayed on any
     // monitor — otherwise Wallpaper Engine keeps a file handle and the
     // delete fails with a confusing OS error halfway through. The caller
@@ -168,8 +165,23 @@ pub fn we_delete_wallpaper(state: AppStateHandle<'_>, pubfileid: String) -> Resu
     if active.iter().any(|id| id == &pubfileid) {
         return Err(format!("ACTIVE:{pubfileid}"));
     }
+
+    // The Installed view merges myprojects, defaultprojects and the Steam
+    // Workshop directory, so the folder can live in any of them. Search all
+    // three instead of assuming myprojects.
+    let Some((folder, source)) = state.we_client.read().find_wallpaper_dir(&pubfileid) else {
+        return Err(format!("NOTFOUND:{pubfileid}"));
+    };
+
+    // Workshop folders belong to the Steam client. Removing one just makes
+    // Steam re-download it, and can leave the subscription bookkeeping
+    // inconsistent, so refuse and let the caller explain.
+    if source == crate::we_client::SOURCE_WORKSHOP {
+        return Err(format!("WORKSHOP:{pubfileid}"));
+    }
+
     state.metadata.read().remove_item(&pubfileid);
-    delete_wallpaper_folder(&projects, &pubfileid).map_err(map_err)
+    remove_folder(&folder).map_err(map_err)
 }
 
 #[command]
@@ -269,4 +281,15 @@ pub fn we_open_profile(state: AppStateHandle<'_>, profile: String) -> Result<(),
         .read()
         .open_profile(&profile)
         .map_err(map_err)
+}
+
+/// Remove a wallpaper folder outright.
+///
+/// Separate from `delete_wallpaper_folder` because the caller already resolved
+/// the absolute path: re-joining a pubfileid would only work for myprojects.
+fn remove_folder(folder: &std::path::Path) -> anyhow::Result<()> {
+    if folder.exists() {
+        std::fs::remove_dir_all(folder)?;
+    }
+    Ok(())
 }

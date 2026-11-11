@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import type { TranslationKey } from "@/i18n/types";
 import { useTranslation } from "@/i18n/hooks";
 import { open as openPath } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
@@ -117,7 +118,7 @@ export function useWallpaperBulkActions({
       void refreshInstalledGlobal();
     } else {
       setItems(previousItems);
-      pushToast(`${t("messages.error") || "Error"}: ${res.error}`, "error");
+      pushToast(describeDeleteError(res.error, t), "error");
     }
   };
 
@@ -199,10 +200,7 @@ export function useWallpaperBulkActions({
     } else {
       setItems(previousItems);
       const errorMsg = results.find((r) => !r.ok)?.error || "Unknown error";
-      pushToast(
-        `${t("messages.bulk_delete_success", { count: 0 })}: ${errorMsg}`,
-        "error",
-      );
+      pushToast(describeDeleteError(errorMsg, t), "error");
     }
   };
 
@@ -374,4 +372,28 @@ export function useWallpaperBulkActions({
     handleCopyId,
     handleInitMetadata,
   };
+}
+
+/**
+ * Turn a backend delete error into something a user can act on.
+ *
+ * The command returns machine-readable prefixes (ACTIVE:/NOTFOUND:/
+ * WORKSHOP:) precisely so the UI can explain what happened instead of
+ * showing a raw string — a silent no-op is what made deletes look like they
+ * worked and then reappear on refresh.
+ */
+function describeDeleteError(
+  raw: string,
+  t: (key: TranslationKey) => string,
+): string {
+  if (raw.startsWith("WORKSHOP:")) {
+    return t("messages.delete_workshop_blocked");
+  }
+  if (raw.startsWith("NOTFOUND:")) {
+    return t("messages.delete_not_found");
+  }
+  if (raw.startsWith("ACTIVE:")) {
+    return t("messages.cannot_delete_active_single");
+  }
+  return `${t("messages.error")}: ${raw}`;
 }

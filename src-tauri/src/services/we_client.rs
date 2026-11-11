@@ -215,6 +215,25 @@ impl WallpaperEngineClient {
         dirs
     }
 
+    /// Locate a wallpaper folder by pubfileid across every scanned directory,
+    /// returning the folder and the source tag it was found under.
+    ///
+    /// The Installed view merges three directories, so a delete has to look in
+    /// all of them too: looking only in myprojects silently did nothing for
+    /// workshop and defaultprojects entries, which then reappeared on refresh.
+    pub fn find_wallpaper_dir(&self, pubfileid: &str) -> Option<(PathBuf, &'static str)> {
+        if pubfileid.is_empty() {
+            return None;
+        }
+        for (dir, source) in self.scan_directories() {
+            let candidate = dir.join(pubfileid);
+            if candidate.is_dir() {
+                return Some((candidate, source));
+            }
+        }
+        None
+    }
+
     pub fn current_wallpaper_pubfileid(&self, monitor: u32) -> Option<String> {
         let config_path = self.config_path()?;
         let raw = std::fs::read_to_string(&config_path).ok()?;
@@ -797,6 +816,39 @@ mod tests {
 
         delete_wallpaper_folder(dir.path(), pubfileid).unwrap();
         assert!(!target.exists());
+    }
+
+    /// Regression: the Installed view merges myprojects, defaultprojects and
+    /// the Workshop directory, so delete must find the folder in whichever of
+    /// them it actually lives. Looking only in myprojects made deletes silently
+    /// no-op, and the wallpaper came back on refresh.
+    #[test]
+    fn find_wallpaper_dir_searches_every_scanned_directory() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // A wallpaper that only exists under defaultprojects.
+        let default_projects = root.join("projects").join("defaultprojects");
+        fs::create_dir_all(default_projects.join("98765")).unwrap();
+
+        // And one under myprojects, which must still win over the others.
+        let my_projects = root.join("projects").join("myprojects");
+        fs::create_dir_all(my_projects.join("11111")).unwrap();
+
+        let client = WallpaperEngineClient::new(Some(root.to_path_buf()));
+
+        let found = client.find_wallpaper_dir("98765");
+        assert!(found.is_some(), "defaultprojects entry must be found");
+        let (folder, source) = found.unwrap();
+        assert_eq!(source, SOURCE_DEFAULT_PROJECTS);
+        assert!(folder.ends_with("98765"));
+
+        let (_, source_my) = client.find_wallpaper_dir("11111").unwrap();
+        assert_eq!(source_my, SOURCE_MY_PROJECTS);
+
+        // Unknown ids must report "not found" instead of pretending success.
+        assert!(client.find_wallpaper_dir("00000").is_none());
+        assert!(client.find_wallpaper_dir("").is_none());
     }
 
     #[test]

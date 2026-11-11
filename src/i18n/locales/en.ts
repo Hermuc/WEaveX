@@ -195,6 +195,8 @@ export default {
     global_settings: "Global Settings",
   },
   messages: {
+    delete_not_found: "That wallpaper folder no longer exists on disk.",
+    delete_workshop_blocked: "Steam Workshop wallpapers are managed by Steam — unsubscribe there to remove it.",
     workshop_item_not_deletable: "Steam Workshop wallpapers are managed by Steam — unsubscribe there to remove it.",
     bulk_delete_has_workshop: "{{count}} selected wallpapers are Steam Workshop items and cannot be deleted here.",
     source_workshop: "Steam Workshop",

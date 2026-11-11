@@ -195,6 +195,8 @@ export default {
     global_settings: "全局设置",
   },
   messages: {
+    delete_not_found: "该壁纸文件夹在磁盘上已不存在。",
+    delete_workshop_blocked: "Steam 创意工坊的壁纸由 Steam 管理，请在 Steam 中取消订阅来移除。",
     workshop_item_not_deletable: "Steam 创意工坊的壁纸由 Steam 管理，请在 Steam 中取消订阅来移除。",
     bulk_delete_has_workshop: "所选中有 {{count}} 个是 Steam 创意工坊壁纸，不能在这里删除。",
     source_workshop: "创意工坊",
