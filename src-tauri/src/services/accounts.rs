@@ -196,6 +196,41 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Regression: the download path must pick the custom account when the
+    /// user has added one and selected it, not silently fall back to an
+    /// expired bundled account.
+    #[test]
+    fn custom_account_is_reachable_by_its_listed_index() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+
+        let builtin = mgr.builtin_count();
+        mgr.add_user_account("my_steam_user", "my_password")
+            .unwrap();
+
+        // accounts_list enumerates merged(), so the custom account sits right
+        // after the bundled ones.
+        let listed = mgr.list_detailed();
+        assert_eq!(listed.len(), builtin + 1);
+        let my_index = listed
+            .iter()
+            .position(|a| a.username == "my_steam_user")
+            .expect("custom account must appear in the list");
+
+        // credentials(index) must resolve to that exact account — this is what
+        // download_start feeds into starting_index.
+        let creds = mgr.credentials(my_index);
+        assert_eq!(creds.username, "my_steam_user");
+        assert!(
+            creds.is_custom,
+            "must be flagged custom so it is not rotated"
+        );
+
+        // And the parser preference must also prefer it.
+        let parser = mgr.preferred_parser_credentials();
+        assert_eq!(parser.username, "my_steam_user");
+    }
+
     /// A fresh install has no custom accounts, so the bundled parser account
     /// is used — the app still works out of the box.
     #[test]

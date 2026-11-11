@@ -248,29 +248,45 @@ impl DownloadManager {
 
                 let mut stderr_tail: Vec<String> = Vec::new();
                 let mut connection_failed = false;
-                let start_time = tokio::time::Instant::now();
+                // Any output from DepotDownloader proves it is alive, so this
+                // is refreshed on every line rather than counting from launch.
+                // The previous absolute 15-second budget killed healthy runs:
+                // connecting to a slow Steam CM server can take longer than that
+                // before the first progress line appears.
+                let mut last_activity = tokio::time::Instant::now();
                 let mut download_started = false;
 
                 loop {
-                    let current_timeout = if !download_started {
-                        let elapsed = start_time.elapsed();
-                        if elapsed >= std::time::Duration::from_secs(15) {
-                            log::warn!(
-                                "15-second timeout reached before download started for {}",
-                                pubfileid
-                            );
-                            connection_failed = true;
-                            break;
-                        }
-                        std::time::Duration::from_secs(15).saturating_sub(elapsed)
+                    // Idle timeout, not a total budget: as long as
+                    // DepotDownloader keeps talking to us it is making progress.
+                    // 45 s of complete silence is the only thing that counts as a
+                    // failure — this covers slow CM handshakes while still
+                    // catching a genuinely hung process.
+                    let idle = last_activity.elapsed();
+                    let budget = if download_started {
+                        // Once transferring, stay patient: a stalled-but-alive
+                        // download can legitimately go quiet for a while.
+                        std::time::Duration::from_secs(300)
                     } else {
-                        // Once download starts, there is no inactivity timeout.
-                        // The user can manually cancel large downloads if needed.
-                        std::time::Duration::from_secs(86400 * 365)
+                        std::time::Duration::from_secs(45)
                     };
+                    if idle >= budget {
+                        log::warn!(
+                            "No output from DepotDownloader for {}s (started={}); treating as connection failure for {}",
+                            idle.as_secs(),
+                            download_started,
+                            pubfileid
+                        );
+                        connection_failed = true;
+                        break;
+                    }
+                    let current_timeout = budget.saturating_sub(idle);
 
                     match tokio::time::timeout(current_timeout, rx.recv()).await {
                         Ok(Some(msg)) => {
+                            // Any line at all means the child is alive; reset the
+                            // idle clock so a slow-but-progressing run is not killed.
+                            last_activity = tokio::time::Instant::now();
                             if let Some(line) = msg.strip_prefix("OUT:") {
                                 let cleaned = line
                                     .replace(&format!("{}\\", output_dir_string), ": ")
@@ -286,6 +302,17 @@ impl DownloadManager {
                                 }
 
                                 let lower = cleaned.to_lowercase();
+                                // Reaching the login/app-info stage means the
+                                // handshake worked. Treat it as started so the
+                                // short connect budget no longer applies.
+                                if lower.contains("logged on")
+                                    || lower.contains("logged in")
+                                    || lower.contains("got appinfo")
+                                    || lower.contains("got depot key")
+                                    || lower.contains("downloading")
+                                {
+                                    download_started = true;
+                                }
                                 if (lower.contains("enter") && lower.contains("code"))
                                     || lower.contains("auth code")
                                     || lower.contains("2 factor")
@@ -422,6 +449,14 @@ impl DownloadManager {
                         },
                     )
                     .ok();
+                    // Leave nothing behind: an empty folder still shows up in
+                    // the Installed view as a broken entry with no project.json.
+                    // Only clean up when the download produced no usable files,
+                    // so a partial-but-valid download is never thrown away.
+                    let out_dir = std::path::Path::new(&output_dir_string);
+                    if !dir_has_project(out_dir) {
+                        let _ = std::fs::remove_dir_all(out_dir);
+                    }
                     tasks.lock().remove(&pubfileid);
                     return;
                 }
@@ -503,6 +538,15 @@ impl DownloadManager {
     fn emit_status(&self, status: &TaskStatus) {
         self.app.emit("download://status", status).ok();
     }
+}
+
+/// True when the folder holds a real project (project.json present).
+///
+/// Used to decide whether a failed download left anything worth keeping: a
+/// folder with only a partial .DepotDownloader cache is unplayable and would
+/// pollute the Installed view.
+fn dir_has_project(dir: &std::path::Path) -> bool {
+    dir.join("project.json").is_file()
 }
 
 /// Returns true if the directory exists and contains at least one regular
