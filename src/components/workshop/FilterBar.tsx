@@ -146,7 +146,9 @@ export default function FilterBar() {
     activeChips.push({
       id: "age_rating",
       label: `${t("tag_categories.Age Rating")}: ${translateTagValue(filters.age_rating, "Age Rating", i18n)}`,
-      onRemove: () => setFilters({ age_rating: "", page: 1 }),
+      // Fall back to the default ("Everyone"), not to "": clearing the chip
+      // must not widen the result set to adult content.
+      onRemove: () => setFilters({ age_rating: DEFAULT_FILTERS.age_rating, page: 1 }),
     });
   }
 

@@ -37,5 +37,3 @@ export const EVENTS = {
   // --- Steam webview session ---
   STEAM_LOGIN_SUCCESS: "steam-login-success",
 } as const;
-
-export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
