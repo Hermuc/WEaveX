@@ -62,6 +62,16 @@ export function useWallpaperBulkActions({
   };
 
   const handleDelete = async (item: InstalledWallpaper) => {
+    // Workshop folders belong to the Steam client: deleting one just makes
+    // Steam re-download it, and can leave its subscription state confused.
+    if (item.source === "workshop") {
+      pushToast(
+        t("messages.workshop_item_not_deletable") ||
+          "Steam Workshop wallpapers are managed by Steam — unsubscribe there to remove it.",
+        "warning",
+      );
+      return;
+    }
     if (inTauri) {
       const active = await tryInvoke<string[]>(
         "we_active_pubfileids",
@@ -113,6 +123,19 @@ export function useWallpaperBulkActions({
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
+
+    const workshopIds = new Set(
+      items.filter((i) => selectedIds.has(i.pubfileid) && i.source === "workshop").map((i) => i.pubfileid),
+    );
+    if (workshopIds.size > 0) {
+      pushToast(
+        t("messages.bulk_delete_has_workshop", { count: workshopIds.size }) ||
+          `${workshopIds.size} of the selected wallpapers are Steam Workshop items and cannot be deleted here.`
+        ,
+        "error",
+      );
+      return;
+    }
 
     if (inTauri) {
       const active = await tryInvoke<string[]>(

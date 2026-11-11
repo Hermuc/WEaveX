@@ -20,6 +20,7 @@ const mockWallpaper = {
   tags: ["Nature", "Scene"],
   size_bytes: 1024 * 1024 * 15,
   installed_ts: 1600000000,
+    source: "myprojects" as const,
 };
 
 describe("Details Panel E2E Tests (F2)", () => {

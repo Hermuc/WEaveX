@@ -23,6 +23,7 @@ const mockWallpaper = {
   tags: ["Nature", "Scene"],
   size_bytes: 1024 * 1024 * 15,
   installed_ts: 1600000000,
+    source: "myprojects" as const,
 };
 
 describe("Cross-Feature Combination E2E Tests (Tier 3)", () => {

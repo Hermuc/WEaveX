@@ -22,7 +22,16 @@ pub struct InstalledWallpaper {
     pub tags: Vec<String>,
     pub size_bytes: u64,
     pub installed_ts: i64,
+    /// Where this wallpaper was found. See the SOURCE_ constants below.
+    pub source: String,
 }
+
+/// A project WEave downloaded itself into projects/myprojects.
+pub const SOURCE_MY_PROJECTS: &str = "myprojects";
+/// One of Wallpaper Engine's bundled sample projects.
+pub const SOURCE_DEFAULT_PROJECTS: &str = "defaultprojects";
+/// A Steam Workshop subscription, owned and updated by the Steam client.
+pub const SOURCE_WORKSHOP: &str = "workshop";
 
 pub struct WallpaperEngineClient {
     pub directory: Option<PathBuf>,
@@ -136,16 +145,29 @@ impl WallpaperEngineClient {
             .unwrap_or(false)
     }
 
+    /// Every wallpaper Wallpaper Engine can actually play. That means three
+    /// separate directories:
+    ///
+    ///   1. projects/myprojects   — what WEave downloads itself
+    ///   2. projects/defaultprojects — the sample projects WE ships with
+    ///   3. steamapps/workshop/content/431960 — Steam Workshop subscriptions
+    ///
+    /// The third one is the reason this exists: most users subscribe in the
+    /// Steam client, so their wallpapers never touch myprojects and a
+    /// myprojects-only scan shows an empty library. Each entry carries a
+    /// `source` so the UI can tell them apart (deleting a workshop item is
+    /// pointless — Steam re-downloads it).
     pub fn installed_wallpapers(&self) -> Vec<InstalledWallpaper> {
-        let Some(projects) = self.projects_path() else {
-            return Vec::new();
-        };
-        if !projects.exists() {
-            return Vec::new();
-        }
+        let mut out: Vec<InstalledWallpaper> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        let mut out = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(projects) {
+        for (dir, source) in self.scan_directories() {
+            if !dir.is_dir() {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let folder = entry.path();
                 if !folder.is_dir() {
@@ -159,11 +181,38 @@ impl WallpaperEngineClient {
                 if pubfileid.is_empty() {
                     continue;
                 }
-                let wallpaper = parse_project(&folder, &pubfileid);
+                // A project WEave downloaded can also be subscribed in Steam;
+                // keep the first hit so myprojects wins over workshop.
+                if !seen.insert(pubfileid.clone()) {
+                    continue;
+                }
+                let mut wallpaper = parse_project(&folder, &pubfileid);
+                wallpaper.source = source.to_string();
                 out.push(wallpaper);
             }
         }
+
         out
+    }
+
+    /// The directories to scan, in priority order, paired with the source tag
+    /// recorded on every entry found there.
+    fn scan_directories(&self) -> Vec<(PathBuf, &'static str)> {
+        let mut dirs: Vec<(PathBuf, &'static str)> = Vec::new();
+
+        if let Some(root) = &self.directory {
+            dirs.push((root.join("projects").join("myprojects"), SOURCE_MY_PROJECTS));
+            dirs.push((
+                root.join("projects").join("defaultprojects"),
+                SOURCE_DEFAULT_PROJECTS,
+            ));
+        }
+
+        for workshop in workshop_content_dirs() {
+            dirs.push((workshop, SOURCE_WORKSHOP));
+        }
+
+        dirs
     }
 
     pub fn current_wallpaper_pubfileid(&self, monitor: u32) -> Option<String> {
@@ -573,6 +622,8 @@ fn parse_project(folder: &Path, pubfileid: &str) -> InstalledWallpaper {
         tags,
         size_bytes,
         installed_ts,
+        // Caller overwrites this with the directory it was found in.
+        source: SOURCE_MY_PROJECTS.to_string(),
     }
 }
 
@@ -643,6 +694,43 @@ fn read_steam_install_path_from_registry() -> Option<PathBuf> {
 /// Parse `<steam>/steamapps/libraryfolders.vdf`. Returns every library
 /// path Steam knows about (the file is a Valve KeyValues format —
 /// quoted-string pairs we can extract with a regex).
+/// Wallpaper Engine's Steam app id. Workshop content for it lives under
+/// <library>/steamapps/workshop/content/431960/.
+const WE_STEAM_APP_ID: &str = "431960";
+
+/// Every `steamapps/workshop/content/431960` directory on this machine.
+///
+/// Steam owns this tree: subscriptions, updates and removals all happen here,
+/// which is exactly why WEave never writes to it. We only read it so the
+/// Installed view reflects what the user actually has.
+fn workshop_content_dirs() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut libraries: Vec<PathBuf> = Vec::new();
+    for steam_root in steam_install_dirs() {
+        libraries.push(steam_root.clone());
+        libraries.extend(steam_library_folders(&steam_root));
+    }
+
+    for lib in libraries {
+        let dir = lib
+            .join("steamapps")
+            .join("workshop")
+            .join("content")
+            .join(WE_STEAM_APP_ID);
+        if !dir.is_dir() {
+            continue;
+        }
+        let key = dir.to_string_lossy().to_lowercase();
+        if seen.insert(key) {
+            out.push(dir);
+        }
+    }
+
+    out
+}
+
 fn steam_library_folders(steam_root: &Path) -> Vec<PathBuf> {
     let vdf = steam_root.join("steamapps").join("libraryfolders.vdf");
     let Ok(text) = std::fs::read_to_string(&vdf) else {

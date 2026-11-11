@@ -63,6 +63,7 @@ const mockItems: InstalledWallpaper[] = Array.from({ length: 100 }, (_, i) => ({
   tags: ["anime"],
   size_bytes: 1024 * 1024 * (i + 1),
   installed_ts: Date.now(),
+  source: "myprojects" as const,
 }));
 
 const mockHandlers = {

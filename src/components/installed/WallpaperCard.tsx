@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "@/i18n/hooks";
-import { Check, Copy, FolderOpen, Package, Play, Trash2 } from "lucide-react";
+import { Check, Cloud, Copy, FolderOpen, Package, Play, Trash2 } from "lucide-react";
 import PreviewImage from "@/components/common/PreviewImage";
 import { InstalledWallpaper } from "@/types/workshop";
 import { cn, formatBytes } from "@/lib/utils";
@@ -117,11 +117,29 @@ export default function WallpaperCard({
           </div>
         )}
 
-        {/* File size */}
-        <div className="absolute top-1.5 left-2 z-2">
+        {/* File size + source */}
+        <div className="absolute top-1.5 left-2 z-2 flex items-center gap-1">
           <span className="inline-flex items-center rounded-full bg-black/40 px-1.5 py-0.5 text-[10px] font-semibold text-white/90 ring-1 ring-white/20 backdrop-blur-sm">
             {formatBytes(item.size_bytes)}
           </span>
+          {item.source !== "myprojects" && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white/90 ring-1 ring-white/20 backdrop-blur-sm",
+                item.source === "workshop" ? "bg-sky-600/50" : "bg-amber-600/50",
+              )}
+              title={
+                item.source === "workshop"
+                  ? t("messages.source_workshop")
+                  : t("messages.source_defaultprojects")
+              }
+            >
+              {item.source === "workshop" ? <Cloud className="size-2.5" /> : <Package className="size-2.5" />}
+              {item.source === "workshop"
+                ? t("messages.source_workshop")
+                : t("messages.source_defaultprojects")}
+            </span>
+          )}
         </div>
 
         {/* Quick Actions */}

@@ -64,6 +64,9 @@ export interface InstalledMetadata {
   author?: string;
 }
 
+/** Where the wallpaper was found on disk. */
+export type InstalledSource = "myprojects" | "defaultprojects" | "workshop";
+
 export interface InstalledWallpaper {
   pubfileid: string;
   folder: string;
@@ -76,6 +79,12 @@ export interface InstalledWallpaper {
   tags: string[];
   size_bytes: number;
   installed_ts: number;
+  /**
+   * myprojects     — downloaded by WEave itself
+   * defaultprojects — one of Wallpaper Engine's bundled samples
+   * workshop       — a Steam Workshop subscription (Steam owns the folder)
+   */
+  source: InstalledSource;
 }
 
 
