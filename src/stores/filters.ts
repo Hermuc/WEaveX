@@ -30,7 +30,8 @@ export const DEFAULT_FILTERS: WorkshopFilters = {
   days: "7",
   category: "",
   type_tag: "",
-  age_rating: "",
+  // Default to "Everyone" so a fresh session never surfaces adult content.
+  age_rating: "Everyone",
   resolution: "",
   misc_tags: [],
   genre_tags: [],

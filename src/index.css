@@ -518,3 +518,18 @@
     transition-duration: 0s !important;
     transition-delay: 0s !important;
 }
+
+/*
+ * Spinners are progress indicators, not decoration: a frozen one reads as a
+ * hung application. WCAG 2.3.3 exempts essential motion from the
+ * reduce-motion preference, so keep them turning while everything else stays
+ * still. Windows reports reduce whenever "Animate controls and elements
+ * inside windows" is off, which is a common setting - it is not a request to
+ * freeze progress feedback.
+ */
+.prefers-reduced-motion .animate-spin,
+.prefers-reduced-motion .animate-spin::before,
+.prefers-reduced-motion .animate-spin::after {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+}
