@@ -4,39 +4,6 @@ use crate::commands::AppStateHandle;
 use crate::workshop::SteamAccount;
 
 use tauri::Emitter;
-static STEAM_LOGIN_POLLING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-#[tauri::command]
-pub async fn steam_login_show(state: AppStateHandle<'_>) -> Result<(), String> {
-    state
-        .steam_webview
-        .show_login()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !STEAM_LOGIN_POLLING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        let app_handle = state.app_handle.clone();
-        let steam_webview = state.steam_webview.clone();
-        let workshop = state.workshop.clone();
-
-        tokio::spawn(async move {
-            for _ in 0..180 {
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                if steam_webview.is_logged_in().await && steam_webview.sync_cookies().await.is_ok()
-                {
-                    workshop.clear_caches();
-                    let _ = steam_webview.hide().await;
-                    let _ = app_handle.emit("steam-login-success", ());
-                    break;
-                }
-            }
-            STEAM_LOGIN_POLLING.store(false, std::sync::atomic::Ordering::SeqCst);
-        });
-    }
-
-    Ok(())
-}
 
 /// Just opens the parser webview window without starting any login-polling loop.
 /// Safe to call when already logged in — will not fire "steam-login-success".
@@ -164,16 +131,6 @@ pub async fn steam_login_fill(
         .steam_webview
         .login_fill(username.trim(), password)
         .await
-}
-
-#[tauri::command]
-pub async fn steam_login_fill_2fa(state: AppStateHandle<'_>, code: &str) -> Result<(), String> {
-    state.steam_webview.login_fill_2fa(code).await
-}
-
-#[tauri::command]
-pub async fn steam_login_switch_to_code(state: AppStateHandle<'_>) -> Result<(), String> {
-    state.steam_webview.login_switch_to_code().await
 }
 
 #[tauri::command]
@@ -307,42 +264,6 @@ pub async fn steam_qr_login_finalize(
     let _ = state.app_handle.emit("steam-login-success", ());
 
     Ok(())
-}
-
-/// What is the login page asking for right now?
-/// Returns "code" (Steam Guard code), "app" (mobile confirmation) or "none".
-/// The frontend uses this instead of guessing from a timeout.
-#[tauri::command]
-pub async fn steam_login_2fa_state(state: AppStateHandle<'_>) -> Result<String, String> {
-    Ok(state.steam_webview.detect_2fa().await)
-}
-
-/// Diagnostic helper: fill without submitting and read the values back.
-#[tauri::command]
-pub async fn steam_login_fill_only(
-    state: AppStateHandle<'_>,
-    username: String,
-    password: String,
-) -> Result<String, String> {
-    Ok(state.steam_webview.fill_only(&username, &password))
-}
-
-/// Diagnostic helper: describe the credential form DOM.
-#[tauri::command]
-pub async fn steam_login_describe_form(state: AppStateHandle<'_>) -> Result<String, String> {
-    Ok(state.steam_webview.describe_form())
-}
-
-/// Diagnostic helper: credential-field state of the hidden login webview.
-#[tauri::command]
-pub async fn steam_login_probe_form(state: AppStateHandle<'_>) -> Result<String, String> {
-    Ok(state.steam_webview.probe_login_form())
-}
-
-/// Diagnostic helper: the visible text of the hidden login webview.
-#[tauri::command]
-pub async fn steam_login_page_text(state: AppStateHandle<'_>) -> Result<String, String> {
-    Ok(state.steam_webview.page_text())
 }
 
 #[tauri::command]
