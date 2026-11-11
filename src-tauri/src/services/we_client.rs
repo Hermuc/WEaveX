@@ -20,6 +20,9 @@ pub struct InstalledWallpaper {
     pub description: String,
     pub file_type: String,
     pub tags: Vec<String>,
+    /// Steam content rating from project.json: "Everyone" / "Questionable" /
+    /// "Mature". Empty when the project does not declare one.
+    pub content_rating: String,
     pub size_bytes: u64,
     pub installed_ts: i64,
     /// Where this wallpaper was found. See the SOURCE_ constants below.
@@ -188,6 +191,13 @@ impl WallpaperEngineClient {
                 }
                 let mut wallpaper = parse_project(&folder, &pubfileid);
                 wallpaper.source = source.to_string();
+                // Wallpaper Engine ships its sample projects without a
+                // contentrating field, but they are first-party samples and
+                // always family-friendly. Without this they would only ever
+                // appear under the "Any" age filter.
+                if wallpaper.content_rating.is_empty() && source == SOURCE_DEFAULT_PROJECTS {
+                    wallpaper.content_rating = "Everyone".to_string();
+                }
                 out.push(wallpaper);
             }
         }
@@ -582,6 +592,7 @@ fn parse_project(folder: &Path, pubfileid: &str) -> InstalledWallpaper {
     let mut preview = String::new();
     let mut description = String::new();
     let mut file_type = String::new();
+    let mut content_rating = String::new();
     let mut tags: Vec<String> = Vec::new();
 
     if let Ok(raw) = std::fs::read_to_string(&project_json_path) {
@@ -594,6 +605,9 @@ fn parse_project(folder: &Path, pubfileid: &str) -> InstalledWallpaper {
             }
             if let Some(s) = value.get("description").and_then(|v| v.as_str()) {
                 description = s.to_string();
+            }
+            if let Some(s) = value.get("contentrating").and_then(|v| v.as_str()) {
+                content_rating = s.to_string();
             }
             if let Some(s) = value.get("type").and_then(|v| v.as_str()) {
                 file_type = s.to_string();
@@ -639,6 +653,7 @@ fn parse_project(folder: &Path, pubfileid: &str) -> InstalledWallpaper {
         description,
         file_type,
         tags,
+        content_rating,
         size_bytes,
         installed_ts,
         // Caller overwrites this with the directory it was found in.
@@ -802,6 +817,30 @@ pub fn delete_wallpaper_folder(projects_path: &Path, pubfileid: &str) -> anyhow:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn verify_content_rating_populated() {
+        let client = WallpaperEngineClient::new(WallpaperEngineClient::detect_installation());
+        let list = client.installed_wallpapers();
+        let mut everyone = 0;
+        let mut mature = 0;
+        let mut missing = 0;
+        for w in &list {
+            match w.content_rating.as_str() {
+                "Everyone" => everyone += 1,
+                "Mature" | "Questionable" => mature += 1,
+                _ => missing += 1,
+            }
+        }
+        println!(
+            "CHECK total={} Everyone={} Mature={} missing={}",
+            list.len(),
+            everyone,
+            mature,
+            missing
+        );
+        assert_eq!(missing, 0, "every wallpaper must have a rating");
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;

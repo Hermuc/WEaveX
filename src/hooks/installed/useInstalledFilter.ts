@@ -42,6 +42,10 @@ export function useInstalledFilter({ items, metaMap }: UseInstalledFilterArgs) {
     () =>
       (item: InstalledWallpaper): Set<string> => {
         const set = new Set<string>(item.tags);
+        // Wallpapers carry their Steam content rating in project.json rather
+        // than as a tag, so fold it in here: the Age Rating filter matches on
+        // this set, and without it a rated wallpaper only showed up under "Any".
+        if (item.content_rating) set.add(item.content_rating);
         const raw = metaMap[item.pubfileid]?.tags;
         if (Array.isArray(raw)) {
           for (const tag of raw) {

@@ -23,6 +23,7 @@ const mockWallpaper = {
   tags: ["Nature", "Scene"],
   size_bytes: 1024 * 1024 * 15,
   installed_ts: 1600000000,
+    content_rating: "Everyone",
     source: "myprojects" as const,
 };
 

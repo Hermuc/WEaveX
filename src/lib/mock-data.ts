@@ -20,6 +20,7 @@ export function makeMockInstalled(): InstalledWallpaper[] {
     tags: i % 2 === 0 ? ["Anime", "3D"] : ["Nature", "Abstract"],
     size_bytes: (i + 1) * 30 * 1024 * 1024,
     installed_ts: Date.now() / 1000 - i * 86400,
+    content_rating: "Everyone",
     source: "myprojects" as const,
   }));
 }

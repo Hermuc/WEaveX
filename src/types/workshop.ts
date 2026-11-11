@@ -77,6 +77,8 @@ export interface InstalledWallpaper {
   description: string;
   file_type: string;
   tags: string[];
+  /** Steam content rating: "Everyone" | "Questionable" | "Mature", or "" */
+  content_rating: string;
   size_bytes: number;
   installed_ts: number;
   /**

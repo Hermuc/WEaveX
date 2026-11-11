@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "@/i18n/hooks";
 import { useAppStore } from "@/stores/app";
 import { useInstalledStore } from "@/stores/installed";
@@ -34,19 +34,41 @@ export function useWallpaperActions() {
   const [loading, setLoading] = useState(true);
   const [metaMap, setMetaMap] = useState<Record<string, InstalledMetadata>>({});
 
-  const refresh = async () => {
+  // Tracks whether a first load has finished, so the skeleton is only shown
+  // before any data exists rather than on every tab switch. A ref (not state)
+  // keeps refresh stable for the dependency arrays below.
+  const hasLoadedRef = useRef(false);
+
+  const refresh = useCallback(async (opts?: { force?: boolean }) => {
     if (!inTauri) {
       setItems(makeMockInstalled());
       setLoading(false);
+      hasLoadedRef.current = true;
       return;
     }
-    setLoading(true);
+
+    // Reuse the cache the bootstrap step filled at startup instead of scanning
+    // the disk again on every visit.
+    const cachedStore = useInstalledStore.getState();
+    const cachedItems = Object.values(cachedStore.byId);
+    if (!opts?.force && cachedStore.ready && cachedItems.length > 0) {
+      setItems(cachedItems);
+      setLoading(false);
+      hasLoadedRef.current = true;
+    } else if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
+
     const list = await tryInvoke<InstalledWallpaper[]>(
       "we_list_installed",
       undefined,
       [],
     );
-    setItems(list ?? []);
+    const next = list ?? [];
+    setItems(next);
+    // Keep the global cache in sync so the next visit is instant.
+    cachedStore.setAll(next);
+
     const meta = await tryInvoke<Record<string, InstalledMetadata>>(
       "metadata_get_all",
       undefined,
@@ -54,14 +76,18 @@ export function useWallpaperActions() {
     );
     setMetaMap(meta ?? {});
     setLoading(false);
-  };
+    hasLoadedRef.current = true;
+  }, []);
 
   useEffect(() => {
+    // weDirectory starts empty and is filled during bootstrap; waiting for the
+    // real path avoids a scan that would immediately be repeated.
+    if (!weDirectory) return;
     const t = setTimeout(() => {
       void refresh();
     }, 0);
     return () => clearTimeout(t);
-  }, [weDirectory]);
+  }, [weDirectory, refresh]);
 
   const refreshCounter = useRefreshStore((s) => s.counter);
   useEffect(() => {
@@ -70,7 +96,7 @@ export function useWallpaperActions() {
       void refresh();
     }, 0);
     return () => clearTimeout(t);
-  }, [refreshCounter, weDirectory]);
+  }, [refreshCounter, weDirectory, refresh]);
 
   useEffect(() => {
     if (installedUpdateCounter > 0) {
@@ -79,7 +105,7 @@ export function useWallpaperActions() {
       }, 0);
       return () => clearTimeout(t);
     }
-  }, [installedUpdateCounter]);
+  }, [installedUpdateCounter, refresh]);
 
   const filter = useInstalledFilter({ items, metaMap });
   const selection = useWallpaperSelection({ filtered: filter.filtered });
