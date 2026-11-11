@@ -66,8 +66,10 @@ export function useWallpaperActions() {
     );
     const next = list ?? [];
     setItems(next);
-    // Keep the global cache in sync so the next visit is instant.
-    cachedStore.setAll(next);
+    // NOTE: deliberately not writing back to the global store here. setAll()
+    // bumps updateCounter, which this hook also watches, so writing back
+    // would re-enter refresh() forever. The global store is owned by bootstrap
+    // and by the download/delete paths, which refresh it explicitly.
 
     const meta = await tryInvoke<Record<string, InstalledMetadata>>(
       "metadata_get_all",
