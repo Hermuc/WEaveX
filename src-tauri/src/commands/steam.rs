@@ -54,6 +54,17 @@ pub async fn steam_login_hide(state: AppStateHandle<'_>) -> Result<(), String> {
     state.steam_webview.hide().await.map_err(|e| e.to_string())
 }
 
+/// Show the Steam login window **on its current page** so the user can finish
+/// Steam Guard / device authorisation themselves. Does NOT reload the URL.
+#[tauri::command]
+pub async fn steam_login_reveal(state: AppStateHandle<'_>) -> Result<(), String> {
+    state
+        .steam_webview
+        .reveal()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn steam_sync_cookies(state: AppStateHandle<'_>) -> Result<usize, String> {
     let n = state.steam_webview.sync_cookies().await?;
@@ -148,7 +159,7 @@ pub async fn steam_login_fill(
     state: AppStateHandle<'_>,
     username: &str,
     password: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     state
         .steam_webview
         .login_fill(username.trim(), password)
@@ -304,6 +315,22 @@ pub async fn steam_qr_login_finalize(
 #[tauri::command]
 pub async fn steam_login_2fa_state(state: AppStateHandle<'_>) -> Result<String, String> {
     Ok(state.steam_webview.detect_2fa().await)
+}
+
+/// Diagnostic helper: fill without submitting and read the values back.
+#[tauri::command]
+pub async fn steam_login_fill_only(
+    state: AppStateHandle<'_>,
+    username: String,
+    password: String,
+) -> Result<String, String> {
+    Ok(state.steam_webview.fill_only(&username, &password))
+}
+
+/// Diagnostic helper: describe the credential form DOM.
+#[tauri::command]
+pub async fn steam_login_describe_form(state: AppStateHandle<'_>) -> Result<String, String> {
+    Ok(state.steam_webview.describe_form())
 }
 
 /// Diagnostic helper: credential-field state of the hidden login webview.

@@ -170,6 +170,45 @@ impl WorkshopClient {
     /// single source of truth for which Steam account the Workshop scraper
     /// is currently acting as, independent of whatever's selected in the
     /// Settings → Download account UI.
+    /// Download a Steam avatar and return it as a `data:image/…;base64,…` URL.
+    ///
+    /// Steam rotates its avatar CDNs, so a CSP host whitelist is fragile: the
+    /// next rotation shows a broken image again. Inlining the bytes removes the
+    /// network dependency from the renderer entirely.
+    ///
+    /// Returns `None` on any failure — the caller then keeps the plain URL and
+    /// the CSP whitelist gets a chance to serve it.
+    async fn fetch_avatar_data_url(&self, url: &str) -> Option<String> {
+        if !url.starts_with("https://") {
+            return None;
+        }
+        let resp = self.client.get(url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/jpeg")
+            .to_string();
+        // Guard against a surprise HTML error page being inlined as an image.
+        if !content_type.starts_with("image/") {
+            return None;
+        }
+        let bytes = resp.bytes().await.ok()?;
+        // Avatars are ~5-40 KB; refuse anything absurd to avoid bloating state.
+        if bytes.is_empty() || bytes.len() > 512 * 1024 {
+            return None;
+        }
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        Some(format!(
+            "data:{};base64,{}",
+            content_type,
+            STANDARD.encode(&bytes)
+        ))
+    }
+
     pub async fn current_account(&self) -> Option<SteamAccount> {
         let resp = self
             .client
@@ -230,12 +269,24 @@ impl WorkshopClient {
             });
 
         // Parse avatar: <img ... src="https://avatars...steamstatic.com/...">
+        //
+        // Steam serves avatars from a *rotating* set of CDNs
+        // (avatars.fastly.steamstatic.com, avatars.st.dl.eccdnx.com,
+        // avatars.akamai.steamstatic.com, …), so whitelisting hosts in the CSP
+        // is a losing game — the next rotation silently breaks the image again.
+        // Instead we inline the picture as a `data:` URL, which the CSP already
+        // permits and which cannot break on a CDN change. If the download fails
+        // we keep the original URL so the CSP whitelist can still serve it.
         let avatar_url = Regex::new(r#"<img[^>]+src="(https://avatars[^"]+)""#)
             .ok()
             .and_then(|re| re.captures(&body))
             .and_then(|c| c.get(1))
             .map(|m| m.as_str().to_string())
             .unwrap_or_default();
+        let avatar_url = match self.fetch_avatar_data_url(&avatar_url).await {
+            Some(data_url) => data_url,
+            None => avatar_url,
+        };
 
         // If we couldn't even find a persona or a steamid, treat as
         // logged-out rather than returning an empty struct.

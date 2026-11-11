@@ -68,12 +68,15 @@ export const CATEGORIES: Record<string, string> = {
   Asset: "Asset",
 };
 
-export const TYPE_KEYS = ["", "Scene", "Video", "Application", "Web"] as const;
+// "Application" was dropped from the picker: Steam no longer serves any
+// Wallpaper Engine "application" items in the Workshop, so the option only ever
+// produced an empty result list. The backend still accepts the raw value (an
+// old saved filter can carry it), we simply stop offering it in the UI.
+export const TYPE_KEYS = ["", "Scene", "Video", "Web"] as const;
 export const TYPES: Record<string, string> = {
   "": "Any",
   Scene: "Scene",
   Video: "Video",
-  Application: "Application",
   Web: "Web",
 };
 

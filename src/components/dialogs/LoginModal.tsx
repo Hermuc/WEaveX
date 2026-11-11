@@ -19,11 +19,9 @@ export default function LoginModal({
   const [step, setStep] = useState<"credentials" | "2fa">("credentials");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showCodeInput, setShowCodeInput] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrSession, setQrSession] = useState<{
     clientId: string;
@@ -31,6 +29,8 @@ export default function LoginModal({
     createdAt: number;
   } | null>(null);
   const [isPrepared, setIsPrepared] = useState(false);
+  // When true, the real Steam window has been shown so the user can finish
+  // Steam Guard there; we only poll for the resulting session.
 
   const setShowLoginPromptOnFail = useAppStore(
     (s) => s.setShowLoginPromptOnFail,
@@ -46,10 +46,8 @@ export default function LoginModal({
       setStep("credentials");
       setUsername("");
       setPassword("");
-      setCode("");
       setBusy(false);
       setErrorMsg(null);
-      setShowCodeInput(false);
       setQrCode(null);
       setQrSession(null);
       setIsPrepared(false);
@@ -220,44 +218,31 @@ export default function LoginModal({
     }
   };
 
-  const waitForLoginResult = async (maxAttempts = 45) => {
+  // We no longer try to drive Steam Guard ourselves. The only reliable path
+  // is: submit the credentials in the real Steam window, then let *Steam*
+  // handle the guard prompt. This poller simply waits for the session cookie
+  // that appears once the user has finished (up to 5 minutes).
+  const waitForLoginResult = async (maxAttempts = 300) => {
     for (let i = 0; i < maxAttempts; i++) {
-      if (!busyRef.current) return "ERROR";
       await new Promise((r) => setTimeout(r, 1000));
-      if (!busyRef.current) return "ERROR";
       const isLoggedIn = await tryInvoke<boolean>(
         "steam_is_logged_in",
         undefined,
         false,
       );
-      if (isLoggedIn) {
-        return "SUCCESS";
-      }
-      // Surface Steam's own error text (wrong password / captcha / rate limit)
-      // as soon as it appears, instead of spinning until the timeout.
-      if (i >= 3) {
+      if (isLoggedIn) return "SUCCESS";
+      if (!busyRef.current) return "CANCELLED";
+      if (i >= 5) {
         const polled = await tryInvoke<string | null>(
           "steam_login_poll_error",
           undefined,
           null,
         );
-        if (polled && polled.length > 20) {
+        // Only a real credential error ends the wait; a Steam Guard screen is
+        // not an error and is handled in the Steam window by the user.
+        if (polled && polled.length > 20 && /密码|password|incorrect|invalid|verify|captcha|次数|尝试/i.test(polled)) {
           setErrorMsg(polled);
           return "ERROR";
-        }
-      }
-      // Ask the backend what the page is actually showing instead of guessing
-      // from elapsed time. The old "i === 25 ⇒ needs 2FA" heuristic turned every
-      // slow/failed login into a fake Steam Guard screen with a spinner for a
-      // code Steam never sent.
-      if (i >= 6) {
-        const state2fa = await tryInvoke<string>(
-          "steam_login_2fa_state",
-          undefined,
-          "none",
-        );
-        if (state2fa === "code" || state2fa === "app") {
-          return "NEEDS_2FA";
         }
       }
     }
@@ -272,18 +257,34 @@ export default function LoginModal({
     setBusy(true);
     busyRef.current = true;
     try {
-      await invoke("steam_login_fill", { username, password });
-      // Polling for success or 2fa (login_fill itself blocks ~10s: it signs the
-      // old session out, loads the form and submits it)
-      const result = await waitForLoginResult(45);
-      if (result === "SUCCESS") {
+      // Hand the credentials to Steam and open its real login window.
+      //
+      // The backend shows the window first (WebView2 suspends scripts while
+      // hidden), drops any stale session, opens the credential form and
+      // *best-effort* prefills it. It returns true only when a session cookie
+      // already exists — i.e. no Steam Guard was needed.
+      const loggedIn = await invoke<boolean>("steam_login_fill", {
+        username,
+        password,
+      });
+      if (loggedIn) {
         await finalizeLogin();
-      } else if (result === "NEEDS_2FA") {
-        setStep("2fa");
+        return;
+      }
+      // Steam Guard (mobile confirmation / email code / new device) is Steam's
+      // own flow. The window is already on screen — the user finishes there.
+      setStep("2fa");
+      const result = await waitForLoginResult(300);
+      if (result === "SUCCESS") {
+        await invoke("steam_login_hide").catch(() => undefined);
+        await finalizeLogin();
       } else if (result === "ERROR") {
-        // do nothing, errorMsg is set
-      } else {
-        setErrorMsg(t("messages.error") || "Login failed or timed out");
+        await invoke("steam_login_hide").catch(() => undefined);
+        setStep("credentials");
+      } else if (result === "FAILED") {
+        setErrorMsg(
+          "Timed out waiting for Steam. Finish signing in inside the Steam window and try again.",
+        );
       }
     } catch (e) {
       setErrorMsg(String(e));
@@ -293,31 +294,6 @@ export default function LoginModal({
     }
   };
 
-  const handle2FASubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // if code is empty but user just confirmed on phone, they still submit. So code isn't strictly required if they approve on phone. But we can require it or let them submit empty.
-    setErrorMsg(null);
-    setBusy(true);
-    busyRef.current = true;
-    try {
-      if (code) {
-        await invoke("steam_login_fill_2fa", { code });
-      }
-      const result = await waitForLoginResult(15);
-      if (result === "SUCCESS") {
-        await finalizeLogin();
-      } else if (result === "ERROR") {
-        // do nothing
-      } else {
-        setErrorMsg(t("messages.error") || "2FA failed or timed out");
-      }
-    } catch (e) {
-      setErrorMsg(String(e));
-    } finally {
-      setBusy(false);
-      busyRef.current = false;
-    }
-  };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -455,90 +431,49 @@ export default function LoginModal({
                 )}
               </div>
             ) : (
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-5 py-2">
                 {errorMsg && (
-                  <div className="mb-0 flex items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-500">
+                  <div className="flex items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-500">
                     <p className="text-xs">{errorMsg}</p>
                   </div>
                 )}
 
-                {!showCodeInput ? (
-                  <div className="flex flex-col items-center justify-center gap-4 py-6">
-                    <div className="flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-primary/10 bg-primary/5 p-4 text-primary">
-                      <span className="inline-block size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                      <span className="text-center text-sm font-medium">
-                        {t("settings.steam_guard_help") ||
-                          "Ожидание подтверждения в мобильном приложении Steam..."}
-                      </span>
-                    </div>
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-primary/10 bg-primary/5 p-5 text-center">
+                  <span className="inline-block size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <p className="text-sm font-medium">
+                    {t("settings.steam_window_title") ||
+                      "Steam 登录窗口已打开，请在其中完成登录"}
+                  </p>
+                  <p className="text-xs leading-relaxed text-muted">
+                    {t("settings.steam_window_help") ||
+                      "如果 Steam 要求手机确认、邮箱验证码或设备授权，请直接在那个窗口里操作。完成后本窗口会自动关闭。"}
+                  </p>
+                </div>
 
-                    <div className="mt-2 flex w-full flex-col gap-2">
-                      <button
-                        type="button"
-                        className="btn-secondary w-full py-2 text-sm"
-                        onClick={async () => {
-                          setShowCodeInput(true);
-                          await tryInvoke("steam_login_switch_to_code").catch(
-                            () => {},
-                          );
-                        }}
-                        disabled={busy}
-                      >
-                        Войти с помощью кода
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn-ghost w-full py-2 text-sm"
-                        onClick={() => {
-                          setStep("credentials");
-                          setShowCodeInput(false);
-                          setErrorMsg(null);
-                        }}
-                        disabled={busy}
-                      >
-                        {t("settings.back_to_login") || "返回重新输入账号"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <form onSubmit={handle2FASubmit} className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium tracking-wide text-subtle uppercase">
-                        {t("settings.steam_guard_code") || "Steam Guard Code"}
-                      </label>
-                      <input
-                        autoFocus
-                        className="input w-full text-center font-mono text-lg tracking-widest"
-                        placeholder="XXXXX"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value.toUpperCase())}
-                        disabled={busy}
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-4">
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        onClick={() => setShowCodeInput(false)}
-                        disabled={busy}
-                      >
-                        {t("buttons.back") || "Back"}
-                      </button>
-                      <button
-                        type="submit"
-                        className="btn-primary flex items-center gap-2"
-                        disabled={busy || !code}
-                      >
-                        {busy && (
-                          <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                        )}
-                        {t("buttons.submit") || "Submit"}
-                      </button>
-                    </div>
-                  </form>
-                )}
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary w-full py-2 text-sm"
+                    onClick={async () => {
+                      await invoke("steam_login_reveal").catch(() => undefined);
+                    }}
+                  >
+                    {t("settings.show_steam_window") || "重新显示 Steam 窗口"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost w-full py-2 text-sm"
+                    onClick={() => {
+                      busyRef.current = false;
+                      void invoke("steam_login_hide").catch(() => undefined);
+                      setStep("credentials");
+                      setErrorMsg(null);
+                      setBusy(false);
+                    }}
+                  >
+                    {t("buttons.cancel") || "取消"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

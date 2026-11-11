@@ -337,6 +337,10 @@ export default {
     login_button: "登录",
     login_title: "Steam 登录",
     back_to_login: "返回重新输入账号",
+    steam_window_title: "请在弹出的 Steam 窗口中完成登录",
+    steam_window_help:
+      "如果 Steam 要求手机确认、邮箱验证码或设备授权，请直接在那个窗口里操作。登录成功后本窗口会自动关闭。",
+    show_steam_window: "重新显示 Steam 窗口",
     login_account_hint: "填写你自己的 Steam 账号。若留空直接点「重新登录系统账户」，会优先使用你在「账户」里添加的自定义账号。",
     login_description: "输入你的 Steam 账户凭据以登录解析器。",
     login_2fa_description: "输入 Steam Guard 验证码，或在移动设备上确认登录。",

@@ -95,6 +95,22 @@ impl SteamWebview {
         Ok(())
     }
 
+    /// Show the webview **without navigating**.
+    ///
+    /// Unlike `show_login()`, which reloads the login URL, this preserves the
+    /// page the user is currently on — e.g. the Steam Guard confirmation step
+    /// that appeared right after their credentials were submitted. Steam owns
+    /// that flow (mobile push, email code, device authorisation); the only
+    /// reliable way through it is to let the user interact with the real page.
+    pub async fn reveal(&self) -> Result<(), tauri::Error> {
+        let _g = self.lock.lock().await;
+        if let Some(w) = self.app.get_webview_window(LABEL) {
+            let _ = w.set_skip_taskbar(false);
+            w.show()?;
+            w.set_focus()?;
+        }
+        Ok(())
+    }
     pub async fn hide(&self) -> Result<(), tauri::Error> {
         if let Some(w) = self.app.get_webview_window(LABEL) {
             w.hide()?;
@@ -133,11 +149,17 @@ impl SteamWebview {
     /// and silently does nothing — the UI just spins and finally reports an
     /// error. Logging out first is what makes the form appear at all.
     async fn logout_locked(&self) -> Result<(), String> {
-        if !self.is_logged_in_inner() {
-            // Already signed out — nothing to do.
-            return Ok(());
-        }
-        log::info!("[steam-webview] logging out existing Steam session before login");
+        // Do NOT gate this on `is_logged_in_inner()`.
+        //
+        // That check only looks for the `steamLoginSecure` cookie. The webview
+        // can still be stuck on a signed-in *page* without it: a Family View
+        // PIN prompt, a Steam support redirect, a stale parser session for the
+        // bundled public account… In exactly those cases the early return left
+        // the old state in place, the navigation never produced a login form,
+        // and whatever the user typed was silently dropped. A user who pressed
+        // "log in" and submitted credentials has explicitly asked for a fresh
+        // session, so wiping the browsing data here is both safe and required.
+        log::info!("[steam-webview] resetting webview state before login");
 
         // `steamLoginSecure` is HttpOnly, so `document.cookie = ...; Max-Age=0`
         // cannot remove it — the JS deletion attempt is a no-op for exactly the
@@ -151,13 +173,17 @@ impl SteamWebview {
         };
         w.clear_all_browsing_data().map_err(|e| e.to_string())?;
 
-        // Give WebView2 a moment to flush the cookie store.
-        for _ in 0..10 {
-            sleep(Duration::from_millis(400)).await;
+        // Give WebView2 time to actually flush the store. The cookie check alone
+        // is not enough to declare success: when the session cookie was already
+        // absent (but the page still held a Family View / parser state) the loop
+        // would exit on the first tick before the wipe had any effect.
+        sleep(Duration::from_millis(1500)).await;
+        for _ in 0..12 {
             if !self.is_logged_in_inner() {
                 log::info!("[steam-webview] logout confirmed");
                 return Ok(());
             }
+            sleep(Duration::from_millis(400)).await;
         }
         log::warn!("[steam-webview] logout could not clear steamLoginSecure");
         Err("Could not sign out of the current Steam session. Close WEave, delete the SteamWebView folder under %LOCALAPPDATA%\\WEave, then reopen and try again."
@@ -245,6 +271,9 @@ impl SteamWebview {
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Ok(false);
         };
+        // WebView2 suspends script execution while the window is hidden, so the
+        // form probe below would never run. Keep it visible.
+        let _ = w.show();
         // `eval` never returns a value, so the probe reports its verdict by
         // rewriting the URL fragment and we read it back via `url()`.
         let probe = r#"
@@ -256,28 +285,61 @@ impl SteamWebview {
             })();
         "#;
 
-        for _ in 0..5 {
-            w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
-                .map_err(|e| e.to_string())?;
-            for _ in 0..12 {
-                sleep(Duration::from_millis(700)).await;
+        // After `clear_all_browsing_data()` WebView2 tears down and rebuilds the
+        // page, and a navigation issued while that is in flight is silently
+        // dropped — the webview then sits on a Steam support/help page with no
+        // inputs and the fill script no-ops. So: first wait for the document to
+        // become usable again, and only then navigate. Each navigation is
+        // followed by its own wait-for-form loop.
+        for _ in 0..40 {
+            sleep(Duration::from_millis(500)).await;
+            if w.url().is_ok() && w.eval("1").is_ok() {
+                break;
+            }
+        }
+
+        for _ in 0..6 {
+            // Already on a page with the form? Don't navigate again.
+            if w.eval(probe).is_ok() {
+                sleep(Duration::from_millis(250)).await;
+                if Self::read_form_flag(&w) {
+                    return Ok(true);
+                }
+            }
+            if w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
+                .is_err()
+            {
+                sleep(Duration::from_millis(800)).await;
+                continue;
+            }
+            // Up to ~18s per attempt for the credential form to render.
+            for _ in 0..30 {
+                sleep(Duration::from_millis(600)).await;
                 if w.eval(probe).is_err() {
                     continue;
                 }
-                sleep(Duration::from_millis(200)).await;
-                let ready = w
-                    .url()
-                    .ok()
-                    .and_then(|u| u.fragment().map(|f| f.to_string()))
-                    .map(|f| f.contains("WE_FORM:1"))
-                    .unwrap_or(false);
-                if ready {
+                sleep(Duration::from_millis(250)).await;
+                if Self::read_form_flag(&w) {
                     return Ok(true);
                 }
             }
         }
         Ok(false)
     }
+
+    /// Read the verdict written by the form probe into the URL fragment.
+    ///
+    /// `WebviewWindow::eval` returns `Result<()>` — it never yields the JS
+    /// value — so a probe cannot "return" anything. Writing the verdict into the
+    /// URL fragment and reading `url()` back is the reliable round-trip.
+    fn read_form_flag(w: &tauri::WebviewWindow) -> bool {
+        w.url()
+            .ok()
+            .and_then(|u| u.fragment().map(|f| f.to_string()))
+            .map(|f| f.contains("WE_FORM:1"))
+            .unwrap_or(false)
+    }
+
     /// Drive the hidden webview through Steam's login form using the given
     /// credentials. The window stays invisible throughout. Returns true if
     /// we end up with a `steamLoginSecure` cookie within the timeout.
@@ -347,6 +409,125 @@ impl SteamWebview {
         Ok(false)
     }
 
+    /// Fill the credential fields **without submitting**, then read them back.
+    /// Used to verify that the React value setter actually took effect.
+    pub fn fill_only(&self, username: &str, password: &str) -> String {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return "no-window".into();
+        };
+        let user = escape_js_string(username);
+        let pass = escape_js_string(password);
+        let script = format!(
+            r#"
+            (function() {{
+                var nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                function setV(el, v) {{
+                    var tr = el._valueTracker;
+                    if (tr) tr.setValue('');
+                    nativeSetter.call(el, v);
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+                var ins = Array.prototype.slice.call(document.querySelectorAll('input'));
+                var pw = null;
+                for (var i=0;i<ins.length;i++) {{
+                    if ((ins[i].getAttribute('type')||'') === 'password' && ins[i].offsetParent !== null) {{ pw = ins[i]; break; }}
+                }}
+                if (!pw) return 'no-password';
+                var scope = pw.form ? pw.form.querySelectorAll('input') : ins;
+                var idx = Array.prototype.indexOf.call(scope, pw);
+                var un = null;
+                for (var j=idx-1;j>=0;j--) {{
+                    var c = scope[j];
+                    var t = (c.getAttribute('type')||'').toLowerCase();
+                    if (t !== 'text' && t !== 'email') continue;
+                    if (!c.offsetParent) continue;
+                    var n = (c.getAttribute('name')||'').toLowerCase();
+                    var ph = (c.getAttribute('placeholder')||'').toLowerCase();
+                    if (n==='term'||ph.indexOf('搜索')>=0) continue;
+                    un = c; break;
+                }}
+                if (!un) return 'no-username';
+                setV(un, "{user}");
+                setV(pw, "{pass}");
+                return 'filled u=' + un.value.length + ' p=' + pw.value.length;
+            }})();
+            "#
+        );
+        let _ = w.eval(&script);
+        std::thread::sleep(Duration::from_millis(600));
+        // Read back through the title channel (works even without a fragment).
+        let probe = r#"
+            (function() {
+                var ins = Array.prototype.slice.call(document.querySelectorAll('input'));
+                var pw = null;
+                for (var i=0;i<ins.length;i++) {
+                    if ((ins[i].getAttribute('type')||'') === 'password') { pw = ins[i]; break; }
+                }
+                var u = 0, p = 0;
+                if (pw) {
+                    p = (pw.value||'').length;
+                    var sc = pw.form ? pw.form.querySelectorAll('input') : ins;
+                    for (var j=0;j<sc.length;j++) {
+                        if ((sc[j].getAttribute('type')||'').toLowerCase() === 'text' && (sc[j].value||'').length) { u = sc[j].value.length; break; }
+                    }
+                }
+                try {
+                    history.replaceState(null, '', location.pathname + location.search + '#WE_RB:' + u + ':' + p);
+                } catch (e) {}
+            })();
+        "#;
+        let _ = w.eval(probe);
+        std::thread::sleep(Duration::from_millis(400));
+        w.url()
+            .ok()
+            .and_then(|u| u.fragment().map(|f| f.to_string()))
+            .and_then(|f| f.strip_prefix("WE_RB:").map(|s| s.to_string()))
+            .unwrap_or_else(|| "no-readback".into())
+    }
+
+    /// Diagnostic: describe the credential form as the fill script sees it.
+    pub fn describe_form(&self) -> String {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return "no-window".into();
+        };
+        let script = r#"
+            (function() {
+                var ins = Array.prototype.slice.call(document.querySelectorAll('input'));
+                var out = ins.map(function(el) {
+                    return (el.getAttribute('type')||'?') + '|name=' + (el.getAttribute('name')||'')
+                        + '|id=' + (el.getAttribute('id')||'')
+                        + '|ph=' + (el.getAttribute('placeholder')||'')
+                        + '|vis=' + (el.offsetParent !== null ? 1 : 0);
+                });
+                var btns = Array.prototype.slice.call(document.querySelectorAll('button, input[type="submit"]'));
+                out.push('--buttons--');
+                btns.forEach(function(b) {
+                    out.push((b.tagName) + '|' + ((b.innerText||b.value||'')+'').trim().slice(0,20) + '|disabled=' + (b.disabled?1:0));
+                });
+                var payload = out.join(' ;; ');
+                try {
+                    history.replaceState(null, '', location.pathname + location.search + '#WE_DESC:' + encodeURIComponent(payload));
+                } catch (e) {}
+                try {
+                    document.title = 'WE_DESC:' + payload.slice(0, 400);
+                } catch (e) {}
+            })();
+        "#;
+        let _ = w.eval(script);
+        std::thread::sleep(Duration::from_millis(300));
+        w.url()
+            .ok()
+            .and_then(|u| u.fragment().map(|f| f.to_string()))
+            .and_then(|f| {
+                f.strip_prefix("WE_DESC:").map(|s| {
+                    urlencoding::decode(s)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| s.to_string())
+                })
+            })
+            .unwrap_or_else(|| "no-desc".into())
+    }
     /// Diagnostic: read back the credential fields and the submit button label.
     pub fn probe_login_form(&self) -> String {
         let Some(w) = self.app.get_webview_window(LABEL) else {
@@ -426,6 +607,14 @@ impl SteamWebview {
     /// was misreported as "2FA required" and the user stared at a spinner for a
     /// code Steam never sent. This looks at the actual DOM instead.
     pub async fn detect_2fa(&self) -> String {
+        self.detect_2fa_inner()
+    }
+
+    /// Synchronous core of [`Self::detect_2fa`].
+    ///
+    /// `login_fill` already holds the webview lock when it needs this answer, so
+    /// it cannot call the `async` wrapper (that would deadlock on the mutex).
+    fn detect_2fa_inner(&self) -> String {
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return "none".into();
         };
@@ -461,7 +650,7 @@ impl SteamWebview {
         if w.eval(script).is_err() {
             return "none".into();
         }
-        sleep(Duration::from_millis(250)).await;
+        std::thread::sleep(Duration::from_millis(250));
         if let Ok(url) = w.url() {
             if let Some(fragment) = url.fragment() {
                 if let Some(v) = fragment.strip_prefix("WE_2FA:") {
@@ -483,38 +672,67 @@ impl SteamWebview {
             .any(|c| c.name() == "steamLoginSecure" && !c.value().is_empty())
     }
 
-    pub async fn login_fill(&self, username: &str, password: &str) -> Result<(), String> {
+    /// Open Steam's real login window for the given account.
+    ///
+    /// Earlier revisions tried to drive the credential form from a *hidden*
+    /// webview with injected JavaScript. That cannot work reliably:
+    ///   * WebView2 suspends script execution while the window is hidden;
+    ///   * Steam's form is React-controlled, so `el.value = x` is reset unless
+    ///     the native setter and `_valueTracker` are used;
+    ///   * the page navigates during submit, so any read-back races it.
+    ///
+    /// So the contract is now: **best-effort prefill, then hand the window to the
+    /// user.** If the prefill lands, the user only has to confirm; if it does
+    /// not, they simply type into Steam's own form — which is exactly the
+    /// behaviour a user expects from a login button. Either way Steam owns the
+    /// Steam Guard step, so mobile confirmation works.
+    ///
+    /// Returns `Ok(true)` when a session cookie is already present (prefill
+    /// logged in without any 2FA), `Ok(false)` when the user still has to finish.
+    pub async fn login_fill(&self, username: &str, password: &str) -> Result<bool, String> {
         let _g = self.lock.lock().await;
         self.ensure_window().map_err(|e| e.to_string())?;
 
-        // 1. Drop whatever session is active. While one exists Steam serves the
-        //    signed-in page (or a Family View PIN prompt) at the login URL, so
-        //    the form would never appear and the fill script silently no-ops.
-        self.logout_locked().await?;
-
-        // 2. Wait for the *form*, not for a fixed delay. Logging out triggers a
-        //    full WebView2 data reset, so the page can take many seconds to come
-        //    back; navigating before that settles leaves us on a Steam support
-        //    page with no inputs at all.
-        if !self.goto_login_form().await.map_err(|e| e.to_string())? {
-            return Err("Steam login form did not load. Check your network connection (a VPN may be required in some regions) and try again.".to_string());
+        // 1. The window MUST be visible: WebView2 does not run scripts (and often
+        //    does not even render) while hidden, and the user needs to interact
+        //    with Steam Guard anyway.
+        if let Some(w) = self.app.get_webview_window(LABEL) {
+            let _ = w.set_skip_taskbar(false);
+            let _ = w.show();
+            let _ = w.set_focus();
+            sleep(Duration::from_millis(600)).await;
         }
 
-        // 3. Fill and submit. Retry a few times because the field may be
-        //    re-rendered by Steam's own validation.
-        let Some(w) = self.app.get_webview_window(LABEL) else {
-            return Err("No window".into());
-        };
-        let script = build_login_script(username, password);
-        for _ in 0..5 {
-            w.eval(&script).map_err(|e| e.to_string())?;
-            sleep(Duration::from_millis(900)).await;
-            // Stop retrying once Steam accepted the submit (session appeared).
-            if self.is_logged_in_inner() {
-                break;
+        // 2. Drop any stale session (Family View lock, bundled parser account…)
+        //    so Steam actually serves the credential form.
+        if let Err(err) = self.logout_locked().await {
+            log::warn!("[steam-webview] logout before login failed: {err}");
+        }
+
+        // 3. Get to the login page. A failure here is not fatal for the user —
+        //    the window is visible and they can navigate themselves.
+        let on_form = self.goto_login_form().await.unwrap_or(false);
+        if !on_form {
+            log::warn!("[steam-webview] login form not detected; leaving the window to the user");
+            return Ok(false);
+        }
+
+        // 4. Best-effort prefill. Never propagate a failure: the user can always
+        //    type into the form that is right in front of them.
+        if let Some(w) = self.app.get_webview_window(LABEL) {
+            let script = build_login_script(username, password);
+            for _ in 0..3 {
+                if w.eval(&script).is_err() {
+                    break;
+                }
+                sleep(Duration::from_millis(800)).await;
+                if self.is_logged_in_inner() {
+                    return Ok(true);
+                }
             }
         }
-        Ok(())
+
+        Ok(self.is_logged_in_inner())
     }
 
     pub async fn login_fill_2fa(&self, code: &str) -> Result<(), String> {
@@ -559,82 +777,77 @@ fn build_login_script(username: &str, password: &str) -> String {
         r#"
         (function() {{
             try {{
-                // IMPORTANT: `querySelector('input[type="text"]')` is NOT safe
-                // here. The login page also carries a store search box
-                // (`input[name="term"]`, placeholder "搜索商店"/"search") and
-                // hidden auth-code boxes — the old code happily typed the
-                // username into the search field, so the credential form stayed
-                // empty and the submit button never enabled. Pick the field by
-                // what identifies a *credential* form instead, and explicitly
-                // skip the known non-login inputs.
-                var isHidden = function(el) {{
-                    return !el.offsetParent && el.style.display === 'none' || el.disabled;
-                }};
-                var looksLikeSearch = function(el) {{
+                // Steam's store login form is React-controlled. Assigning
+                // `el.value = x` is accepted by the DOM but React immediately
+                // resets it from its own state, so the field ends up empty and
+                // the submit does nothing — that is exactly the "I typed my
+                // password and nothing happened" bug.
+                //
+                // The reliable way is to go through the native value setter and
+                // then dispatch the events React listens for. React tracks the
+                // previous value in `_valueTracker`; if that still holds the old
+                // text it treats the change as a no-op, so the tracker has to be
+                // reset as well.
+                var nativeSetter = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype, 'value'
+                ).set;
+                function setReactValue(el, v) {{
+                    var tracker = el._valueTracker;
+                    if (tracker) tracker.setValue('');
+                    nativeSetter.call(el, v);
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    // Some Steam forms listen for key events to enable the
+                    // submit button.
+                    el.dispatchEvent(new KeyboardEvent('keyup', {{ bubbles: true, key: 'a' }}));
+                }}
+
+                var isSearch = function(el) {{
                     var n = (el.getAttribute('name') || '').toLowerCase();
                     var ph = (el.getAttribute('placeholder') || '').toLowerCase();
-                    var ty = (el.getAttribute('type') || '').toLowerCase();
-                    if (ty === 'hidden' || ty === 'submit' || ty === 'button') return true;
                     if (n === 'term' || n === 'snr' || n === 'search') return true;
                     if (ph.indexOf('搜索') >= 0 || ph.indexOf('search') >= 0) return true;
                     return false;
                 }};
-                var isAuthCodeBox = function(el) {{
+                var isCodeBox = function(el) {{
                     var id = (el.getAttribute('id') || '').toLowerCase();
-                    var cls = (el.getAttribute('class') || '').toLowerCase();
-                    return id.indexOf('authcode') >= 0
-                        || id.indexOf('twofactor') >= 0
+                    var ph = (el.getAttribute('placeholder') || '').toLowerCase();
+                    return id.indexOf('authcode') >= 0 || id.indexOf('twofactor') >= 0
                         || id.indexOf('friendlyname') >= 0
-                        || cls.indexOf('authcode') >= 0;
+                        || ph.indexOf('验证码') >= 0;
                 }};
+                var visible = function(el) {{ return el.offsetParent !== null && !el.disabled; }};
 
                 var inputs = Array.prototype.slice.call(document.querySelectorAll('input'));
-                var pass = null, login = null;
-                // 1) The password field anchors the credential form.
+                // The password field anchors the credential form.
+                var pass = null;
                 for (var i = 0; i < inputs.length; i++) {{
-                    var el = inputs[i];
-                    if ((el.getAttribute('type') || '') === 'password' && !looksLikeSearch(el)) {{
-                        pass = el; break;
+                    if ((inputs[i].getAttribute('type') || '') === 'password' && visible(inputs[i])) {{
+                        pass = inputs[i]; break;
                     }}
                 }}
-                if (pass) {{
-                    // 2) Username = nearest preceding visible text input in the
-                    //    same form (or, failing that, the first credential-ish
-                    //    text input that is not a search/auth-code box).
-                    var form = pass.form || pass.closest('form') || document.body;
-                    var scope = Array.prototype.slice.call(form.querySelectorAll('input'));
-                    var passIdx = scope.indexOf(pass);
-                    for (var j = passIdx - 1; j >= 0; j--) {{
-                        var c = scope[j];
-                        var t = (c.getAttribute('type') || '').toLowerCase();
-                        if (t !== 'text' && t !== 'email' && t !== 'tel') continue;
-                        if (looksLikeSearch(c) || isAuthCodeBox(c)) continue;
-                        login = c; break;
-                    }}
-                    if (!login) {{
-                        for (var k = 0; k < inputs.length; k++) {{
-                            var d = inputs[k];
-                            var td = (d.getAttribute('type') || '').toLowerCase();
-                            if (td !== 'text' && td !== 'email' && td !== 'tel') continue;
-                            if (looksLikeSearch(d) || isAuthCodeBox(d)) continue;
-                            login = d; break;
-                        }}
-                    }}
+                if (!pass) return {{ ready: false, why: 'no-password' }};
+
+                // Username = the visible text input right before the password
+                // field in the same form, skipping search / auth-code boxes.
+                var scope = pass.form
+                    ? Array.prototype.slice.call(pass.form.querySelectorAll('input'))
+                    : inputs;
+                var pIdx = scope.indexOf(pass);
+                var login = null;
+                for (var j = pIdx - 1; j >= 0; j--) {{
+                    var c = scope[j];
+                    var t = (c.getAttribute('type') || '').toLowerCase();
+                    if (t !== 'text' && t !== 'email' && t !== 'tel') continue;
+                    if (!visible(c) || isSearch(c) || isCodeBox(c)) continue;
+                    login = c; break;
                 }}
-                if (!login || !pass) return {{ready:false}};
-                function fill(el, v) {{
-                    el.focus();
-                    var s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-                    s.call(el, v);
-                    el.dispatchEvent(new Event('input', {{bubbles:true}}));
-                    el.dispatchEvent(new Event('change', {{bubbles:true}}));
-                }}
-                fill(login, "{user}");
-                fill(pass, "{pass}");
-                // Submit button: never trust `button[type="submit"]` — the page
-                // header is full of submit buttons ("浏览"/"推荐"/"类别"…) that are
-                // part of navigation forms. Match on the visible label instead,
-                // and only inside the credential form when one is available.
+                if (!login) return {{ ready: false, why: 'no-username' }};
+
+                setReactValue(login, "{user}");
+                setReactValue(pass, "{pass}");
+
+                // Submit: prefer the button whose label is the login action.
                 var labelHit = function(el) {{
                     var t = ((el.innerText || el.value || '') + '').trim().toLowerCase();
                     if (!t) return false;
@@ -642,37 +855,20 @@ fn build_login_script(username: &str, password: &str) -> String {
                         || t.indexOf('sign in') >= 0 || t.indexOf('登录') >= 0;
                 }};
                 var btn = null;
-                var containers = [];
-                if (pass.form) containers.push(pass.form);
-                else if (pass.closest('form')) containers.push(pass.closest('form'));
-                containers.push(document);
+                var containers = pass.form ? [pass.form, document] : [document];
                 for (var ci = 0; ci < containers.length && !btn; ci++) {{
                     var cands = Array.prototype.slice.call(
-                        containers[ci].querySelectorAll('button, input[type="submit"], a')
+                        containers[ci].querySelectorAll('button, input[type="submit"]')
                     );
                     for (var bi = 0; bi < cands.length; bi++) {{
-                        var cand = cands[bi];
-                        if (cand.disabled) continue;
-                        if ((cand.getAttribute('type') || '').toLowerCase() === 'hidden') continue;
-                        if (labelHit(cand)) {{ btn = cand; break; }}
+                        if (cands[bi].disabled || !visible(cands[bi])) continue;
+                        if (labelHit(cands[bi])) {{ btn = cands[bi]; break; }}
                     }}
                 }}
-                if (btn) {{
-                    btn.disabled = false;
-                    btn.click();
-                    return {{ready:true, clicked:true}};
-                }}
-                // Fallback: submit the form directly (Enter on the password box
-                // triggers the same handler in the server-rendered page).
-                if (pass.form) {{
-                    pass.focus();
-                    var ev = new KeyboardEvent('keydown', {{bubbles:true, key:'Enter', keyCode:13, which:13}});
-                    pass.dispatchEvent(ev);
-                    return {{ready:true, clicked:false, submitted:true}};
-                }}
-                return {{ready:true, clicked:false}};
+                if (btn) {{ btn.disabled = false; btn.click(); }}
+                return {{ ready: true, clicked: !!btn }};
             }} catch (e) {{
-                return {{error: String(e)}};
+                return {{ error: String(e) }};
             }}
         }})();
         "#

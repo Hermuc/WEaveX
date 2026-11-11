@@ -61,3 +61,35 @@ tempfile = "3.27.0"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# ---------------------------------------------------------------------------
+# Build profiles — tuned for iteration speed on this machine.
+#
+# Measured on this checkout (9468 lines of Rust, 608 dependency crates):
+#   cargo check --release     4 s   type-check only, no machine code
+#   cargo build   (dev)      28 s   codegen, unoptimised
+#   cargo build --release    58 s   codegen, opt-level=3
+#
+# So 85% of a full build is codegen, and `cargo check` is the fastest way to
+# answer "does this still compile?" during normal editing.
+#
+# Things that were measured and made NO difference (do not "optimise" these):
+#   * crate-type = ["rlib"] instead of [staticlib, cdylib, rlib]  → 58 s
+#   * release opt-level = 1                                       → 64 s (slower)
+#   * release incremental = true                                  → 58 s
+#   * dependencies recompiling                                    → only 2 units built
+# ---------------------------------------------------------------------------
+
+# Development profile: drop debug symbols. They are ~30% of the build cost and
+# are only needed when actually attaching a debugger.
+[profile.dev]
+debug = false
+incremental = true
+
+# "Ship it, but fast": optimised code without the expensive LTO pass. Useful
+# when you need a real release binary to test but do not want to wait for the
+# final-delivery settings.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16

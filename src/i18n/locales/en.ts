@@ -337,6 +337,10 @@ export default {
     login_button: "Login",
     login_title: "Steam Login",
     back_to_login: "Back to credentials",
+    steam_window_title: "Finish signing in inside the Steam window",
+    steam_window_help:
+      "If Steam asks for mobile confirmation, an email code or device authorisation, complete it in that window. This dialog closes automatically once you are signed in.",
+    show_steam_window: "Show the Steam window again",
     login_account_hint: "Enter your own Steam account. If you leave the fields empty and click 'Relogin to system account', your custom account (added under Accounts) is used first.",
     login_description: "Enter your Steam account credentials to log in to the parser.",
     login_2fa_description: "Enter your Steam Guard code or confirm the login on your mobile device.",
