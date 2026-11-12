@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Image as ImageIcon } from "lucide-react";
 
@@ -31,6 +31,11 @@ function toDisplaySrc(src?: string): string | undefined {
   return src;
 }
 
+/** Animated previews are expensive to decode, so only on-screen ones animate. */
+function isAnimated(src: string): boolean {
+  return /\.gif(\?|$)/i.test(src);
+}
+
 export default function PreviewImage({
   src,
   alt,
@@ -43,12 +48,46 @@ export default function PreviewImage({
     toDisplaySrc(src),
   );
   const [failed, setFailed] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
   if (src !== prevSrc) {
     setPrevSrc(src);
     setFailed(false);
     setResolved(toDisplaySrc(src));
   }
+
+  // Wallpaper previews are commonly ~1MB animated GIFs and a grid can hold
+  // dozens. Decoding them all at once froze the view on first paint, and
+  // loading="lazy" does not help for local files (they resolve instantly, so
+  // the decode still happens). Only animated previews are gated here; static
+  // JPEGs are cheap enough to load eagerly.
+  const animated = !!src && isAnimated(src);
+  useEffect(() => {
+    if (!animated) return;
+    const el = imgRef.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      // No observer (old runtime / tests): show immediately, deferring the
+      // state write to a microtask keeps it out of the effect body.
+      void Promise.resolve().then(() => setVisible(true));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setVisible(true);
+            io.disconnect();
+            return;
+          }
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [animated, resolved]);
 
   if (!src || failed) {
     return (
@@ -63,17 +102,25 @@ export default function PreviewImage({
     );
   }
 
+  // Off-screen animated previews render a still placeholder rather than the
+  // GIF itself, so no decode happens until the card is actually visible.
+  const showSrc = animated && !visible ? undefined : resolved;
+
   return (
     <img
-      src={resolved}
+      ref={imgRef}
+      src={showSrc}
       alt={alt ?? ""}
       draggable={false}
+      loading="lazy"
+      decoding="async"
       onError={() => {
         setFailed(true);
       }}
       className={cn(
         "size-full animate-fade-in",
         fit === "cover" ? "object-cover" : "object-contain",
+        !showSrc && "bg-surface-sunken",
         className,
       )}
     />
