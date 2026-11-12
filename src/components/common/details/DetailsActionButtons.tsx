@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
+  Clapperboard,
   Copy,
   Download,
   ExternalLink,
@@ -33,6 +34,9 @@ interface DetailsActionButtonsProps {
   addOptimistic: (pubfileid: string, wallpaper: InstalledWallpaper) => void;
   onClose: () => void;
   onDownload?: (item: WorkshopItem) => void;
+  /// Stream the wallpaper's video to an external player while it downloads.
+  /// Only offered for video wallpapers; undefined hides the button.
+  onWatch?: (item: WorkshopItem) => void;
   onApply?: (item: InstalledWallpaper) => void;
   onExtract?: (item: InstalledWallpaper) => void;
   onDelete?: (item: InstalledWallpaper) => void;
@@ -59,6 +63,7 @@ export default function DetailsActionButtons({
   addOptimistic,
   onClose,
   onDownload,
+  onWatch,
   onApply,
   onExtract,
   onDelete,
@@ -227,6 +232,25 @@ export default function DetailsActionButtons({
             <div className="w-full" />
           )}
         </div>
+
+        {/* Video wallpapers can be streamed to an external player while the
+            download is still running, so the user does not wait for the whole
+            file. Only shown when the caller supplies a handler. */}
+        {kind === "workshop" && onWatch && (
+          <button
+            disabled={meta.is_collection}
+            onClick={() => {
+              if (item && onWatch) {
+                onWatch(item as WorkshopItem);
+                onClose();
+              }
+            }}
+            className="hover-shimmer flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/25 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+          >
+            <Clapperboard className="size-4" />
+            {t("messages.watch_while_downloading") || "Watch while downloading"}
+          </button>
+        )}
 
         {/* Moved Open WE to dropdown */}
 

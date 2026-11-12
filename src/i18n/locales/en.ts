@@ -203,6 +203,12 @@ export default {
     source_defaultprojects: "Bundled",
 
     download_started: "Download started!",
+    watch_while_downloading: "Watch while downloading",
+    streaming_starting: "Preparing stream…",
+    streaming_started: "Playing in {{player}}",
+    streaming_no_player: "No external player found. Install mpv or VLC to use this.",
+    streaming_no_account: "Add a Steam account in Settings first.",
+    streaming_failed: "Could not start streaming: {{error}}",
     extraction_started: "Extraction started!",
     wallpaper_deleted: "Wallpaper deleted!",
     id_copied: "ID copied to clipboard!",

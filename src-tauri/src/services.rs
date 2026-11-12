@@ -7,5 +7,8 @@ pub mod metadata;
 pub mod qr;
 pub mod translator;
 pub mod updater;
+pub mod video_player;
+pub mod video_server;
+pub mod video_stream;
 pub mod we_client;
 pub mod workshop;

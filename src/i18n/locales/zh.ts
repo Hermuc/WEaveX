@@ -203,6 +203,12 @@ export default {
     source_defaultprojects: "内置",
 
     download_started: "下载已开始！",
+    watch_while_downloading: "边下边看",
+    streaming_starting: "正在准备播放…",
+    streaming_started: "正在用 {{player}} 播放",
+    streaming_no_player: "未找到外部播放器。请安装 mpv 或 VLC 后使用此功能。",
+    streaming_no_account: "请先在「设置 → 账户」里添加 Steam 账号。",
+    streaming_failed: "启动播放失败：{{error}}",
     extraction_started: "解包已开始！",
     wallpaper_deleted: "壁纸已删除！",
     id_copied: "ID 已复制到剪贴板！",

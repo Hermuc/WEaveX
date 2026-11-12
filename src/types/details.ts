@@ -18,6 +18,8 @@ export interface WorkshopProps extends CommonProps {
   kind: "workshop";
   item: WorkshopItem | null;
   onDownload: (item: WorkshopItem) => void;
+  /// Stream the video to an external player while downloading (video wallpapers).
+  onWatch?: (item: WorkshopItem) => void;
 }
 
 export interface InstalledProps extends CommonProps {

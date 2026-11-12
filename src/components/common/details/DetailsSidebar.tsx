@@ -184,6 +184,7 @@ export default function DetailsSidebar(props: DetailsSidebarProps) {
             addOptimistic={addOptimistic}
             onClose={props.onClose}
             onDownload={props.kind === "workshop" ? props.onDownload : undefined}
+            onWatch={props.kind === "workshop" ? props.onWatch : undefined}
             onApply={props.kind === "installed" ? props.onApply : undefined}
             onExtract={props.kind === "installed" ? props.onExtract : undefined}
             onDelete={props.kind === "installed" ? handleDeleteAttempt : undefined}

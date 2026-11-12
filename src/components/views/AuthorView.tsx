@@ -15,6 +15,7 @@ import { pushToast } from "@/stores/toasts";
 import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
 import { describeDownloadError } from "@/lib/errors";
+import { useWatchWhileDownloading } from "@/hooks/useWatchWhileDownloading";
 import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { WorkshopItem, WorkshopPage } from "@/types/workshop";
@@ -129,6 +130,8 @@ export default function AuthorView() {
     setSelected(item);
   };
 
+  const handleWatch = useWatchWhileDownloading();
+
   const handleDownload = async (item: WorkshopItem) => {
     if (item.is_collection) {
       openCollectionNav(item.pubfileid, item.title);
@@ -227,6 +230,7 @@ export default function AuthorView() {
                   item={withAuthor}
                   onOpen={handleOpen}
                   onDownload={handleDownload}
+
                   hideDownload={tab === "collections"}
                 />
               );
@@ -249,6 +253,8 @@ export default function AuthorView() {
         item={selected}
         onClose={() => setSelected(null)}
         onDownload={handleDownload}
+
+        onWatch={handleWatch}
       />
     </div>
   );

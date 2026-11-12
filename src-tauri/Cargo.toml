@@ -28,6 +28,18 @@ serde = { version = "1.0.228", features = [ "derive" ] }
 serde_json = "1.0.150"
 tokio = { version = "1.52.3", features = [ "full" ] }
 reqwest = { version = "0.13.4", default-features = false, features = [ "json", "cookies", "gzip", "brotli", "form", "native-tls" ] }
+# Steam depot protocol (MIT/Apache-2.0): used for the stream-while-downloading
+# video pipeline. We only need chunk-level access (download_chunk / process_chunk)
+# plus workshop manifest resolution; normal downloads still go through
+# DepotDownloaderMod.
+steamroom = "0.3"
+steamroom-client = "0.3"
+# steamroom's protobuf messages use prost 0.14; needed to encode/decode
+# PublishedFile.GetDetails request/response in video_stream.
+prost = "0.14"
+# Local HTTP range server that streams video chunks on demand to an external
+# player (mpv). Tiny, tokio-native, no TLS needed (loopback only).
+axum = "0.8"
 scraper = "0.27.0"
 ego-tree = "0.11.0"
 url = "2.5.8"

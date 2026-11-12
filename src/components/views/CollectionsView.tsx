@@ -19,6 +19,7 @@ import { pushToast } from "@/stores/toasts";
 import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
 import { describeDownloadError } from "@/lib/errors";
+import { useWatchWhileDownloading } from "@/hooks/useWatchWhileDownloading";
 import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
 import type { WorkshopFilters } from "@/stores/filters";
 import { CollectionContents, WorkshopItem, WorkshopPage } from "@/types/workshop";
@@ -229,6 +230,8 @@ export default function CollectionsView() {
     if (c) setOpened(c);
   };
 
+  const handleWatch = useWatchWhileDownloading();
+
   const handleDownload = async (item: WorkshopItem) => {
     if (item.is_collection) {
       await openCollection(item);
@@ -282,6 +285,7 @@ export default function CollectionsView() {
           items={opened.items}
           onOpen={setSelected}
           onDownload={handleDownload}
+
           emptyLabel={t("labels.no_wallpapers_found")}
         />
         <DetailsPanel
@@ -289,6 +293,8 @@ export default function CollectionsView() {
           item={selected}
           onClose={() => setSelected(null)}
           onDownload={handleDownload}
+
+          onWatch={handleWatch}
         />
         <CollectionInfoDialog
           open={showInfo}
@@ -362,6 +368,8 @@ export default function CollectionsView() {
         item={selected}
         onClose={() => setSelected(null)}
         onDownload={handleDownload}
+
+        onWatch={handleWatch}
       />
     </div>
   );

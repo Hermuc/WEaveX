@@ -15,6 +15,7 @@ import { useRefreshStore } from "@/stores/refresh";
 import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
 import { describeDownloadError } from "@/lib/errors";
+import { useWatchWhileDownloading } from "@/hooks/useWatchWhileDownloading";
 import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
 import type { WorkshopFilters } from "@/stores/filters";
 import { WorkshopItem, WorkshopPage } from "@/types/workshop";
@@ -143,6 +144,8 @@ export default function WorkshopView() {
     onPageChange: handlePageChange,
   });
 
+  const handleWatch = useWatchWhileDownloading();
+
   const handleDownload = async (item: WorkshopItem) => {
     if (item.is_collection) {
       setSelected(item);
@@ -190,6 +193,7 @@ export default function WorkshopView() {
                   item={item}
                   onOpen={setSelected}
                   onDownload={handleDownload}
+
                 />
               )}
             />
@@ -218,6 +222,8 @@ export default function WorkshopView() {
         item={selected}
         onClose={() => setSelected(null)}
         onDownload={handleDownload}
+
+        onWatch={handleWatch}
       />
     </div>
   );

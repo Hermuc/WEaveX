@@ -12,6 +12,7 @@ pub mod plugins;
 pub mod steam;
 pub mod translator;
 pub mod updater;
+pub mod video_stream;
 pub mod we;
 pub mod workshop;
 
