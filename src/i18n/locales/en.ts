@@ -300,6 +300,10 @@ export default {
     we_directory_hint: "Path to Wallpaper Engine installation",
     account: "Account",
     steam_session: "Steam web session",
+    account_section: "Steam account",
+    account_section_description:
+      "One account signs in for browsing and is used for downloads.",
+    no_account: "No account added",
     steam_session_description:
       "Log in to Steam for the parser to view 18+ content.",
     download_account: "Download account",

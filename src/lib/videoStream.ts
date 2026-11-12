@@ -21,6 +21,19 @@ export interface StreamStarted {
   player: string;
 }
 
+/**
+ * Kick off background resolution of a workshop video so a later "watch" click
+ * is instant. Fire-and-forget; errors are logged server-side.
+ */
+export async function prewarmVideoStream(itemId: string | number): Promise<void> {
+  const id = typeof itemId === "number" ? itemId : Number(itemId);
+  try {
+    await invoke("video_stream_prewarm", { itemId: id });
+  } catch {
+    // best-effort; the start path will resolve inline if prewarm failed
+  }
+}
+
 /** Which external player the app found, or null when none is installed. */
 export async function getStreamPlayer(): Promise<PlayerInfo | null> {
   try {

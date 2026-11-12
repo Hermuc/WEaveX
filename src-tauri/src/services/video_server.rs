@@ -48,10 +48,14 @@ impl Drop for VideoServer {
 
 /// Start serving `video` on a random loopback port.
 pub async fn serve(video: ResolvedVideo) -> anyhow::Result<VideoServer> {
+    serve_arc(Arc::new(video)).await
+}
+
+pub async fn serve_arc(video: Arc<ResolvedVideo>) -> anyhow::Result<VideoServer> {
     let total = video.info.total_size;
     let filename = video.info.filename.clone();
     let state = Arc::new(ServerState {
-        video: Arc::new(video),
+        video,
         total,
         content_type: content_type_for(&filename),
     });
@@ -143,28 +147,24 @@ fn parse_range(header: Option<&HeaderValue>, total: u64) -> Option<(u64, u64)> {
 }
 
 async fn handle_video(State(st): State<Arc<ServerState>>, headers: HeaderMap) -> Response {
+    let has_range = headers.contains_key(header::RANGE);
     let range = parse_range(headers.get(header::RANGE), st.total);
 
+    // A plain GET must describe the REAL file size. Capping it (the previous
+    // 4MB limit) made the player believe the file was 4MB, so seeking past that
+    // failed and the tail (moov) was unreachable. Headers are sent immediately
+    // either way, and the body streams chunk by chunk, so there is no need to
+    // pre-download anything.
     let (start, end) = match range {
         Some((s, e)) => (s, e),
-        None => {
-            // No Range: serve from the start. Streaming the entire body is fine
-            // for a player that just probes; it will cancel after the header.
-            (0, st.total.saturating_sub(1))
-        }
+        None => (0, st.total.saturating_sub(1)),
     };
     let len = end - start + 1;
 
-    // Fetch the requested window (chunk-aligned internally).
-    let data = match st.video.read_range(start, len).await {
-        Ok(d) => d,
-        Err(e) => {
-            log::error!("[video-server] read_range {start}+{len} failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "stream error").into_response();
-        }
-    };
-
-    let partial = headers.contains_key(header::RANGE);
+    // Send headers NOW; the body streams chunk-by-chunk so the player can start
+    // decoding as soon as the first bytes arrive instead of waiting on a full
+    // window download (which previously exceeded the player's open timeout).
+    let partial = has_range;
     let status = if partial {
         StatusCode::PARTIAL_CONTENT
     } else {
@@ -186,5 +186,6 @@ async fn handle_video(State(st): State<Arc<ServerState>>, headers: HeaderMap) ->
         }
     }
 
-    (status, resp_headers, Body::from(data)).into_response()
+    let stream = st.video.clone().stream_range(start, len);
+    (status, resp_headers, Body::from_stream(stream)).into_response()
 }

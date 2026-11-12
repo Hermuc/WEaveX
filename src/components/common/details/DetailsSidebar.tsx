@@ -16,6 +16,7 @@ import { Tooltip } from "@/components/common/Tooltip";
 import { useAppStore } from "@/stores/app";
 import { dismissAllToasts } from "@/stores/toasts";
 import { inTauri, tryInvoke } from "@/lib/tauri";
+import { prewarmVideoStream } from "@/lib/videoStream";
 
 type DetailsSidebarProps = WorkshopProps | InstalledProps;
 
@@ -51,6 +52,16 @@ export default function DetailsSidebar(props: DetailsSidebarProps) {
   
   const hasItem = !!props.item;
   const [showSettings, setShowSettings] = useState(false);
+
+  // Start resolving the video in the background as soon as a workshop item's
+  // details open, so clicking "watch while downloading" is near-instant.
+  const workshopItemId =
+    props.kind === "workshop" && props.item && !props.item.is_collection
+      ? props.item.pubfileid
+      : null;
+  useEffect(() => {
+    if (workshopItemId && inTauri) void prewarmVideoStream(workshopItemId);
+  }, [workshopItemId]);
   
   // Track previous hasItem to detect when drawer opens
   const [prevHasItem, setPrevHasItem] = useState(hasItem);

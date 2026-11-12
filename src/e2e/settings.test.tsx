@@ -140,7 +140,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     await userEvent.click(accountTab);
 
     // Initially Not signed in
-    expect(await screen.findByText(/not signed in/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no account added|not signed in/i)).toBeInTheDocument();
 
     // Trigger success event
     emitTauriEvent("steam-login-success", {});
@@ -215,7 +215,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     await userEvent.click(accountTab);
 
     // Initially Not signed in
-    expect(await screen.findByText(/not signed in/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no account added|not signed in/i)).toBeInTheDocument();
   });
 
   it("T2.3.2 should show error toast on invalid directory selection", async () => {

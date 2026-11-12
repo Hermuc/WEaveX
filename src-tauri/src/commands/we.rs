@@ -31,9 +31,22 @@ pub fn we_set_directory(state: AppStateHandle<'_>, path: String) -> Result<(), S
     Ok(())
 }
 
+/// List installed wallpapers.
+///
+/// Scanning walks three directories and parses every project.json, which is
+/// slow enough to freeze the UI when run on the main thread (Tauri executes
+/// synchronous commands there, so the window cannot even repaint). The scan
+/// therefore runs on a blocking worker and the result is returned asynchronously.
 #[command]
-pub fn we_list_installed(state: AppStateHandle<'_>) -> Vec<InstalledWallpaper> {
-    state.we_client.read().installed_wallpapers()
+pub async fn we_list_installed(
+    state: AppStateHandle<'_>,
+) -> Result<Vec<InstalledWallpaper>, String> {
+    // Clone the Arc so the worker owns it; the RwLock guard must not cross an
+    // await point.
+    let client = state.we_client.clone();
+    tauri::async_runtime::spawn_blocking(move || client.read().installed_wallpapers())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[command]

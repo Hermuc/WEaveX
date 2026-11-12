@@ -80,6 +80,13 @@ pub struct ResolvedVideo {
     http: Arc<reqwest::Client>,
     /// Index of the endpoint that last worked, to avoid retrying dead ones.
     preferred: Arc<std::sync::atomic::AtomicUsize>,
+    /// Decrypted chunk bodies already fetched, keyed by chunk index.
+    ///
+    /// Fetching one chunk serially from this CDN measured 1s for the first and
+    /// 44s for the next, so a player waiting on a sequential stream starves.
+    /// Prefetching ahead concurrently (as DepotDownloader does with
+    /// -max-downloads) and memoising the results keeps playback fed.
+    cache: Arc<parking_lot::Mutex<std::collections::HashMap<usize, Arc<Vec<u8>>>>>,
 }
 
 impl ResolvedVideo {
@@ -91,63 +98,199 @@ impl ResolvedVideo {
         })
     }
 
-    /// Fetch, decrypt and decompress one chunk, returning its full bytes.
+    /// Fetch, decrypt and decompress one chunk.
+    ///
+    /// All endpoints are raced concurrently and the first complete response wins.
+    /// Endpoint speeds on this network differ by orders of magnitude (measured
+    /// 217ms, 57s and a 90s timeout for the same request), so trying them one at
+    /// a time made a single 1MB chunk take 80s. Racing them means the chunk costs
+    /// as much as the fastest host, not the sum of the slow ones.
     async fn fetch_chunk(&self, span: &ChunkSpan) -> anyhow::Result<Vec<u8>> {
-        // Validate the hex id up front so a corrupt manifest fails loudly.
         let _ = parse_chunk_id(&span.chunk_id)?;
 
-        let n = self.endpoints.len();
-        if n == 0 {
+        if self.endpoints.is_empty() {
             return Err(anyhow::anyhow!("no CDN endpoints"));
         }
-        let start_at = self.preferred.load(std::sync::atomic::Ordering::Relaxed);
-        let mut last_err = String::new();
 
-        for k in 0..n {
-            let idx = (start_at + k) % n;
-            let ep = &self.endpoints[idx];
-            let url = format!(
-                "{}/depot/{}/chunk/{}{}",
-                ep.base,
-                self.depot.0,
-                span.chunk_id,
-                ep.token.as_deref().unwrap_or("")
-            );
-
-            match self.http.get(&url).send().await {
-                Ok(resp) => {
-                    let status = resp.status();
-                    if !status.is_success() {
-                        last_err = format!("HTTP {status}");
-                        continue;
-                    }
-                    let body = match resp.bytes().await {
-                        Ok(b) => b,
-                        Err(e) => {
-                            last_err = format!("body: {e}");
-                            continue;
-                        }
-                    };
-                    let out = steamroom::depot::chunk::process_chunk(
-                        &body,
-                        &self.depot_key,
-                        span.len as u32,
-                        span.checksum,
-                    )
-                    .map_err(|e| anyhow::anyhow!("process chunk {}: {e}", span.chunk_id))?;
-                    self.preferred
-                        .store(idx, std::sync::atomic::Ordering::Relaxed);
-                    return Ok(out);
-                }
-                Err(e) => last_err = e.to_string(),
-            }
+        // Try the last-known-good endpoint first, then everything else, all at once.
+        let preferred_idx = self.preferred.load(std::sync::atomic::Ordering::Relaxed);
+        let mut order: Vec<usize> = (0..self.endpoints.len()).collect();
+        if preferred_idx < order.len() {
+            order.swap(0, preferred_idx);
         }
-        Err(anyhow::anyhow!(
-            "chunk {} failed: {last_err}",
-            span.chunk_id
-        ))
+
+        use futures_util::future::FutureExt;
+        let mut futs: Vec<_> = order
+            .into_iter()
+            .map(|idx| {
+                let ep = &self.endpoints[idx];
+                let url = format!(
+                    "{}/depot/{}/chunk/{}{}",
+                    ep.base,
+                    self.depot.0,
+                    span.chunk_id,
+                    ep.token.as_deref().unwrap_or("")
+                );
+                let http = self.http.clone();
+                let key = self.depot_key.clone();
+                let len = span.len as u32;
+                let sum = span.checksum;
+                async move {
+                    let resp = http.get(&url).send().await.ok()?;
+                    if !resp.status().is_success() {
+                        return None;
+                    }
+                    let body = resp.bytes().await.ok()?;
+                    let out = steamroom::depot::chunk::process_chunk(&body, &key, len, sum).ok()?;
+                    Some((idx, out))
+                }
+                .boxed()
+            })
+            .collect();
+
+        let mut last_err = String::from("all endpoints failed");
+        while !futs.is_empty() {
+            let (res, _i, rest) = futures_util::future::select_all(futs).await;
+            futs = rest;
+            if let Some((idx, out)) = res {
+                self.preferred
+                    .store(idx, std::sync::atomic::Ordering::Relaxed);
+                return Ok(out);
+            }
+            last_err = format!("chunk {} failed on a host", span.chunk_id);
+        }
+        Err(anyhow::anyhow!("{last_err}"))
     }
 
+    /// Fetch one chunk by index, using the cache and falling back to the network.
+    async fn chunk_at(self: &Arc<Self>, idx: usize) -> anyhow::Result<Arc<Vec<u8>>> {
+        if let Some(hit) = self.cache.lock().get(&idx).cloned() {
+            return Ok(hit);
+        }
+        let span = self
+            .info
+            .spans
+            .get(idx)
+            .ok_or_else(|| anyhow::anyhow!("chunk index {idx} out of range"))?;
+
+        // Retry with a small backoff: this network drops connections mid-body
+        // often enough that a single failure would otherwise abort the stream and
+        // make the player report a corrupt packet.
+        let mut last_err = None;
+        for attempt in 0..3u32 {
+            match self.fetch_chunk(span).await {
+                Ok(bytes) => {
+                    let data = Arc::new(bytes);
+                    self.cache.lock().insert(idx, data.clone());
+                    return Ok(data);
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        300 * u64::from(attempt + 1),
+                    ))
+                    .await;
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("chunk {idx} failed")))
+    }
+
+    /// Warm `count` chunks starting at `from` concurrently in the background.
+    ///
+    /// Steam rate-limits a single connection hard enough that sequential
+    /// fetching is unusable for playback (measured 1s then 44s per chunk), while
+    /// the official downloader opens many connections at once. This mirrors
+    /// that: several chunks in flight, results memoised for the reader.
+    fn prefetch(self: &Arc<Self>, from: usize, count: usize) {
+        const CONCURRENCY: usize = 6;
+        let total = self.info.spans.len();
+        let end = (from + count).min(total);
+        if from >= end {
+            return;
+        }
+        let this = self.clone();
+        tokio::spawn(async move {
+            let mut next = from;
+            loop {
+                let mut batch = Vec::new();
+                while batch.len() < CONCURRENCY && next < end {
+                    // Skip what is already cached.
+                    if !this.cache.lock().contains_key(&next) {
+                        batch.push(next);
+                    }
+                    next += 1;
+                }
+                if batch.is_empty() {
+                    if next >= end {
+                        break;
+                    }
+                    continue;
+                }
+                let futs = batch.into_iter().map(|i| {
+                    let v = this.clone();
+                    async move {
+                        let _ = v.chunk_at(i).await;
+                    }
+                });
+                futures_util::future::join_all(futs).await;
+                if next >= end {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Stream the byte window as a sequence of slices, one chunk at a time.
+    /// Lets the HTTP server send headers immediately and trickle the body.
+    pub fn stream_range(
+        self: Arc<Self>,
+        offset: u64,
+        len: u64,
+    ) -> impl futures_util::Stream<Item = Result<Vec<u8>, std::io::Error>> {
+        let end = (offset + len).min(self.info.total_size);
+        // Work in chunk indices so the cache and the prefetcher agree on keys.
+        let mut indices: Vec<usize> = Vec::new();
+        for (i, s) in self.info.spans.iter().enumerate() {
+            let span_end = s.offset + s.len;
+            if span_end > offset && s.offset < end {
+                indices.push(i);
+            }
+        }
+        // Warm the next window in the background so the player does not wait
+        // for a serial chain of slow CDN responses.
+        if let Some(&first) = indices.first() {
+            self.prefetch(first, indices.len() + 12);
+        }
+        futures_util::stream::unfold((self, indices, 0usize, offset, end), |st| async move {
+            let (video, indices, k, offset, end) = st;
+            if k >= indices.len() {
+                return None;
+            }
+            let idx = indices[k];
+            let span = &video.info.spans[idx];
+            let item = match video.chunk_at(idx).await {
+                Ok(data) => {
+                    let span_end = span.offset + span.len;
+                    let from = offset.max(span.offset) - span.offset;
+                    let to = (end.min(span_end) - span.offset).min(data.len() as u64);
+                    if from < to {
+                        Ok(data[from as usize..to as usize].to_vec())
+                    } else {
+                        // Never emit a zero-length slice mid-stream: the
+                        // declared Content-Length must match the bytes sent,
+                        // otherwise the player reads past the real data and
+                        // reports a corrupt packet.
+                        Ok(Vec::new())
+                    }
+                }
+                Err(e) => Err(std::io::Error::other(e.to_string())),
+            };
+            // Keep the pipeline full as playback advances.
+            video.prefetch(idx + 1, 8);
+            Some((item, (video, indices, k + 1, offset, end)))
+        })
+    }
     /// Read `len` bytes starting at `offset`, fetching only overlapping chunks.
     pub async fn read_range(&self, offset: u64, len: u64) -> anyhow::Result<Vec<u8>> {
         let end = (offset + len).min(self.info.total_size);
@@ -556,8 +699,24 @@ pub async fn resolve_video(
             }
         }
     });
-    let results = futures_util::future::join_all(manifest_futs).await;
-    let direct = results.into_iter().flatten().next();
+    // Take the FIRST endpoint that answers, not all of them. join_all would wait
+    // for the slowest host: measured 217ms for a healthy host against 57s for a
+    // slow one and a 90s timeout for a dead one, so waiting on all of them turned
+    // a sub-second fetch into minutes.
+    let direct = {
+        use futures_util::future::FutureExt;
+        let mut futs = manifest_futs.map(|f| f.boxed()).collect::<Vec<_>>();
+        let mut winner = None;
+        while !futs.is_empty() {
+            let (res, _idx, rest) = futures_util::future::select_all(futs).await;
+            futs = rest;
+            if let Some(hit) = res {
+                winner = Some(hit);
+                break;
+            }
+        }
+        winner
+    };
 
     let manifest_data = match direct {
         Some((base, data)) => {
@@ -657,6 +816,7 @@ pub async fn resolve_video(
                 endpoints: Arc::new(endpoints),
                 http: Arc::new(serving_http),
                 preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             });
         }
     }
@@ -682,29 +842,55 @@ pub async fn resolve_video(
         .build()
         .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
 
+    // Probe all endpoints concurrently and keep the first that serves bytes.
+    // Serially probing meant one dead host cost a full timeout before the next
+    // was even tried.
     let mut live: Vec<CdnEndpoint> = Vec::new();
-    for ep in &endpoints {
-        let url = format!(
-            "{}/depot/{}/chunk/{}{}",
-            ep.base,
-            depot_id.0,
-            probe_span.chunk_id,
-            ep.token.as_deref().unwrap_or("")
-        );
-        match probe_http.get(&url).send().await {
-            Ok(r) if r.status().is_success() => {
+    {
+        use futures_util::future::FutureExt;
+        let mut futs: Vec<_> = endpoints
+            .iter()
+            .map(|ep| {
+                let url = format!(
+                    "{}/depot/{}/chunk/{}{}",
+                    ep.base,
+                    depot_id.0,
+                    probe_span.chunk_id,
+                    ep.token.as_deref().unwrap_or("")
+                );
+                let http = probe_http.clone();
+                let ep2 = ep.clone();
+                async move {
+                    match http.get(&url).send().await {
+                        Ok(r) if r.status().is_success() => Some(ep2),
+                        Ok(r) => {
+                            log::warn!(
+                                "[video-stream] CDN endpoint {} -> HTTP {}",
+                                ep2.base,
+                                r.status()
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            log::warn!("[video-stream] CDN endpoint {} -> {e}", ep2.base);
+                            None
+                        }
+                    }
+                }
+                .boxed()
+            })
+            .collect();
+        while !futs.is_empty() {
+            let (res, _i, rest) = futures_util::future::select_all(futs).await;
+            futs = rest;
+            if let Some(ep) = res {
                 log::info!("[video-stream] CDN endpoint OK: {}", ep.base);
-                live.push(ep.clone());
-                break; // first working host wins; do not burn time on the rest
+                live.push(ep);
+                break;
             }
-            Ok(r) => log::warn!(
-                "[video-stream] CDN endpoint {} -> HTTP {}",
-                ep.base,
-                r.status()
-            ),
-            Err(e) => log::warn!("[video-stream] CDN endpoint {} -> {e}", ep.base),
         }
     }
+
     if live.is_empty() {
         // Nothing answered the probe. Rather than fail outright, keep every
         // endpoint: the probe itself may have been the unlucky request, and
@@ -733,5 +919,6 @@ pub async fn resolve_video(
         endpoints: Arc::new(live),
         http: Arc::new(http),
         preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
     })
 }

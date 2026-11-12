@@ -24,7 +24,9 @@ export function useInstalledFilter({ items, metaMap }: UseInstalledFilterArgs) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<string>("");
-  const [age, setAge] = useState<string>("");
+  // Default to "Everyone" rather than "Any": the Installed view should open on
+  // a safe filter, and users who want mature content can switch explicitly.
+  const [age, setAge] = useState<string>("Everyone");
   const [resolution, setResolution] = useState<string>("");
   const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [excludedTagFilters, setExcludedTagFilters] = useState<string[]>([]);
@@ -126,7 +128,19 @@ export function useInstalledFilter({ items, metaMap }: UseInstalledFilterArgs) {
         const want = typeFilter.toLowerCase();
         if (!has.has(typeFilter) && ft !== want) return false;
       }
-      if (age && !has.has(age)) return false;
+      if (age) {
+        // "Everyone" also covers wallpapers that declare no rating at all:
+        // Wallpaper Engine sample projects and older uploads omit
+        // contentrating, and treating those as non-Everyone hid them from the
+        // default view entirely.
+        const rated = has.has(age);
+        const unrated =
+          age === "Everyone" &&
+          !has.has("Everyone") &&
+          !has.has("Questionable") &&
+          !has.has("Mature");
+        if (!rated && !unrated) return false;
+      }
       if (resolution && !has.has(resolution)) return false;
       if (tagFilters.length > 0) {
         if (!tagFilters.every((f) => has.has(f))) return false;

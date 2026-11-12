@@ -300,6 +300,9 @@ export default {
     we_directory_hint: "Wallpaper Engine 的安装路径",
     account: "账户",
     steam_session: "Steam 网页会话",
+    account_section: "Steam 账号",
+    account_section_description: "同一个账号用于浏览登录与下载。",
+    no_account: "未添加账号",
     steam_session_description:
       "登录 Steam，让解析器可以查看 18+ 内容。",
     download_account: "下载账户",

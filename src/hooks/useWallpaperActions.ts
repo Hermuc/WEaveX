@@ -59,24 +59,20 @@ export function useWallpaperActions() {
       setLoading(true);
     }
 
-    const list = await tryInvoke<InstalledWallpaper[]>(
-      "we_list_installed",
-      undefined,
-      [],
-    );
+    // Fetch the list and its metadata together: they are independent, and doing
+    // them in sequence doubled the wait on a cold cache.
+    const [list, meta] = await Promise.all([
+      tryInvoke<InstalledWallpaper[]>("we_list_installed", undefined, []),
+      tryInvoke<Record<string, InstalledMetadata>>("metadata_get_all", undefined, {}),
+    ]);
     const next = list ?? [];
     setItems(next);
+    setMetaMap(meta ?? {});
     // NOTE: deliberately not writing back to the global store here. setAll()
     // bumps updateCounter, which this hook also watches, so writing back
     // would re-enter refresh() forever. The global store is owned by bootstrap
     // and by the download/delete paths, which refresh it explicitly.
 
-    const meta = await tryInvoke<Record<string, InstalledMetadata>>(
-      "metadata_get_all",
-      undefined,
-      {},
-    );
-    setMetaMap(meta ?? {});
     setLoading(false);
     hasLoadedRef.current = true;
   }, []);

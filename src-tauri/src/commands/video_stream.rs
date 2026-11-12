@@ -1,8 +1,9 @@
 //! Commands backing the "watch while downloading" feature.
 //!
-//! Flow: `video_stream_probe` (is a player available?) → `video_stream_start`
-//! (resolve the workshop item, start the local range server, launch the player)
-//! → `video_stream_stop` (tear the server down).
+//! The expensive part (Steam login + manifest resolve) is done in the background
+//! as soon as the user opens a wallpaper's details (`video_stream_prewarm`), and
+//! the resolved video is cached. `video_stream_start` then only starts the local
+//! range server and launches the player, so clicking "watch" is near-instant.
 
 use std::sync::Arc;
 
@@ -13,12 +14,17 @@ use tauri::State;
 use crate::commands::AppStateHandle;
 use crate::services::video_player;
 use crate::services::video_server::{self, VideoServer};
-use crate::services::video_stream;
+use crate::services::video_stream::{self, ResolvedVideo};
 
-/// Live streams, keyed by workshop item id, so a second click can stop one.
+type ReadyMap = std::collections::HashMap<u64, Arc<ResolvedVideo>>;
+
+/// Live streams plus pre-resolved videos, keyed by workshop item id.
 #[derive(Default)]
 pub struct StreamRegistry {
     servers: Mutex<std::collections::HashMap<u64, VideoServer>>,
+    ready: Mutex<ReadyMap>,
+    /// Items currently being resolved in the background (dedupe prewarm).
+    pending: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl StreamRegistry {
@@ -51,18 +57,67 @@ pub fn video_stream_player() -> Option<PlayerInfo> {
     })
 }
 
-/// Resolve a workshop item, start a range server for its video, and hand the
-/// URL to the external player.
+/// Resolve a video in the background and cache it, so a later "watch" click is
+/// instant. Safe to call repeatedly; concurrent calls for the same item dedupe.
+#[tauri::command]
+pub async fn video_stream_prewarm(
+    state: AppStateHandle<'_>,
+    registry: State<'_, Arc<StreamRegistry>>,
+    item_id: u64,
+) -> Result<(), String> {
+    if registry.ready.lock().contains_key(&item_id) {
+        return Ok(());
+    }
+    {
+        let mut pending = registry.pending.lock();
+        if !pending.insert(item_id) {
+            return Ok(()); // already resolving
+        }
+    }
+    let reg = registry.inner().clone();
+    let creds = state.accounts.preferred_parser_credentials();
+    tauri::async_runtime::spawn(async move {
+        let result = resolve_with_retry(&creds, item_id).await;
+        reg.pending.lock().remove(&item_id);
+        match result {
+            Ok(video) => {
+                reg.ready.lock().insert(item_id, Arc::new(video));
+                log::info!("[video-stream] prewarm ready for {item_id}");
+            }
+            Err(e) => log::warn!("[video-stream] prewarm failed for {item_id}: {e}"),
+        }
+    });
+    Ok(())
+}
+
+async fn resolve_with_retry(
+    creds: &crate::services::accounts::AccountCredentials,
+    item_id: u64,
+) -> anyhow::Result<ResolvedVideo> {
+    if creds.username.is_empty() {
+        return Err(anyhow::anyhow!("NO_ACCOUNT"));
+    }
+    let client = video_stream::shared_login(&creds.username, &creds.password).await?;
+    match video_stream::resolve_video(&client, item_id).await {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            log::warn!("[video-stream] resolve on cached session failed ({e}); fresh login");
+            video_stream::forget_session();
+            let fresh = video_stream::login(&creds.username, &creds.password).await?;
+            video_stream::resolve_video(&fresh, item_id).await
+        }
+    }
+}
+
+/// Start the range server and launch the player. Uses the prewarmed video when
+/// available; otherwise resolves inline (first-ever click).
 #[tauri::command]
 pub async fn video_stream_start(
     state: AppStateHandle<'_>,
     registry: State<'_, Arc<StreamRegistry>>,
     item_id: u64,
 ) -> Result<StreamStarted, String> {
-    // A player is required; fail before doing any network work.
     let player = video_player::detect().ok_or_else(|| "NO_PLAYER".to_string())?;
-
-    // Reuse the account the user already configured.
     let creds = state.accounts.preferred_parser_credentials();
     if creds.username.is_empty() {
         return Err("NO_ACCOUNT".into());
@@ -76,36 +131,24 @@ pub async fn video_stream_start(
         }
     }
 
-    // Reuse a cached session when possible: a full CM handshake costs 10-40s,
-    // and the button can be clicked several times in a row.
-    let client = video_stream::shared_login(&creds.username, &creds.password)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let video = match video_stream::resolve_video(&client, item_id).await {
-        Ok(v) => v,
-        Err(e) => {
-            // The cached session may have gone stale (CM drops idle sockets).
-            // Forget it and retry once with a fresh login.
-            log::warn!("[video-stream] resolve failed on cached session ({e}); retrying fresh");
-            video_stream::forget_session();
-            let fresh = video_stream::login(&creds.username, &creds.password)
+    // Take the prewarmed video under a short-lived lock so the guard is dropped
+    // before any await (parking_lot guards are not Send).
+    let prewarmed = registry.ready.lock().remove(&item_id);
+    let video = match prewarmed {
+        Some(v) => v,
+        None => Arc::new(
+            resolve_with_retry(&creds, item_id)
                 .await
-                .map_err(|e| e.to_string())?;
-            video_stream::resolve_video(&fresh, item_id)
-                .await
-                .map_err(|e| e.to_string())?
-        }
+                .map_err(|e| e.to_string())?,
+        ),
     };
 
     let info = video.info.clone();
-    let server = video_server::serve(video)
+    let server = video_server::serve_arc(video)
         .await
         .map_err(|e| e.to_string())?;
     let url = server.url();
-
     video_player::launch(&player, &url).map_err(|e| format!("launch failed: {e}"))?;
-
     let player_name = player.kind.name().to_string();
     registry.servers.lock().insert(item_id, server);
 
@@ -118,7 +161,7 @@ pub async fn video_stream_start(
     })
 }
 
-/// Stop the stream for one item (the player keeps its buffer and exits on its own).
+/// Stop the stream for one item.
 #[tauri::command]
 pub fn video_stream_stop(registry: State<'_, Arc<StreamRegistry>>, item_id: u64) -> bool {
     let mut servers = registry.servers.lock();

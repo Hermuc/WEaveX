@@ -209,14 +209,13 @@ describe("Cross-Feature Combination E2E Tests (Tier 3)", () => {
     const accountTab = await screen.findByRole("tab", { name: /account/i });
     await userEvent.click(accountTab);
 
-    const userRadio = await screen.findByLabelText(/user123/i);
-    await userEvent.click(userRadio);
-
-    await waitFor(() => {
-      expect(useAppStore.getState().accountIndex).toBe(5);
-      // Verify radio button checked status in the DOM
-      expect(userRadio).toBeChecked();
-    });
+    // The account page now shows one merged block: the stored account appears
+    // as a row (with a remove action) instead of a selectable radio, because a
+    // single account is used for both browsing and downloads.
+    expect(await screen.findByText("user123")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(/remove account/i),
+    ).toBeInTheDocument();
   });
 
   it("T3.8 (F2 + F5) A11y panel dismissal: pressing Escape key closes open details drawer and returns focus", async () => {

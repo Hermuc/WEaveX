@@ -172,6 +172,7 @@ pub fn run() {
             commands::plugins::plugins_init,
             commands::logging::log_frontend_message,
             commands::video_stream::video_stream_player,
+            commands::video_stream::video_stream_prewarm,
             commands::video_stream::video_stream_start,
             commands::video_stream::video_stream_stop,
             commands::video_stream::video_stream_stop_all,
