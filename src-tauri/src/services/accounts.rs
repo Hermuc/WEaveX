@@ -1,15 +1,20 @@
-//! Account management. Built-in public accounts are embedded as an encrypted
-//! bundle; user-added accounts are stored encrypted on disk via
+//! Account management.
+//!
+//! Only the accounts a user adds themselves exist: the old encrypted bundle of
+//! shared public credentials was removed deliberately. Those accounts belonged
+//! to the upstream author, were frequently rate-limited or had their passwords
+//! changed (the source of most `InvalidPassword` download failures), and
+//! sharing one Steam account across many installs is exactly what Steam's
+//! anti-abuse checks look for.
+//!
+//! A user therefore signs in once, and that single account serves both jobs:
+//! the Workshop parser session (via the webview) and downloads (via
+//! DepotDownloader). User accounts are stored encrypted on disk via
 //! `user_accounts::UserAccountsStore`.
 
 use std::sync::Arc;
 
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use base64::{engine::general_purpose, Engine as _};
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 pub mod user_accounts;
 
@@ -23,48 +28,38 @@ pub struct AccountCredentials {
 }
 
 pub struct AccountManager {
-    /// Default + CLI-injected accounts (never persisted to disk).
-    builtin: RwLock<Vec<AccountCredentials>>,
     /// Encrypted user accounts persisted to `<app_data>/user_accounts.enc`.
+    /// This is the only account source: there is no bundled account pool any
+    /// more.
     user_store: Arc<UserAccountsStore>,
-}
-
-const BUILTIN_ACCOUNT_BUNDLE_KEY: &[u8] = b"WEave built-in Steam accounts bundle v1";
-const BUILTIN_ACCOUNT_BUNDLE: &str = concat!(
-    "h0m6wUVpNDnJPxcGwGQcdocH6IIllAM2x1yyS7sHXfqwhaBtXusl+kNUwBne2g8PNUK0xen+chgB49muEjjp",
-    "MvUMM5g03SarxUoZf1dhECB0KwsfEZEjRWsBGSD2aO/8ZsUaDOdf6ITjwscsB/bp5yQLRk7PagyfJdBhIiNF2lRoiVJ9Y7DZlJSc7/qAV1eq8z3d2C/VE4djAg9lyQr4Ggde+fYsztziOL7NEQ8JKzoOISS9oIg="
-);
-
-#[derive(Debug, Deserialize, Default)]
-struct BuiltinAccountsBundle {
-    download: Vec<(String, String)>,
-    parser: (String, String),
 }
 
 impl AccountManager {
     pub fn from_runtime(app_data_dir: &std::path::Path) -> Self {
-        let builtin = build_default();
         let user_store = Arc::new(UserAccountsStore::open(app_data_dir));
-        Self {
-            builtin: RwLock::new(builtin),
-            user_store,
-        }
+        Self { user_store }
     }
 
+    /// Every account the user has added, in insertion order.
     fn merged(&self) -> Vec<AccountCredentials> {
-        let mut all = self.builtin.read().clone();
-        for stored in self.user_store.list() {
-            all.push(AccountCredentials {
+        self.user_store
+            .list()
+            .into_iter()
+            .map(|stored| AccountCredentials {
                 username: stored.username,
                 password: stored.password,
                 is_custom: true,
-            });
-        }
-        all
+            })
+            .collect()
     }
 
+    /// How many accounts exist. Zero means "nothing to download with yet".
+    ///
+    /// Named `builtin_count` historically (it counted the bundled pool); the
+    /// download retry loop uses it as "how many accounts can I rotate through",
+    /// which is still exactly right — there is just no built-in pool now.
     pub fn builtin_count(&self) -> usize {
-        self.builtin.read().len()
+        self.user_store.list().len()
     }
 
     pub fn list_usernames(&self) -> Vec<String> {
@@ -120,75 +115,30 @@ impl AccountManager {
             .collect()
     }
 
-    /// Credentials to use for the *parser* (Workshop scraping) session.
+    /// Credentials for the *parser* (Workshop scraping) session, i.e. the
+    /// identity the hidden Steam webview signs in as.
     ///
-    /// Selection order:
-    ///   1. the first user-added account (``is_custom == true``) — this is
-    ///      what lets a user browse the Workshop as *themselves* instead of
-    ///      sharing the bundled public account;
-    ///   2. the built-in dedicated parser account, so a fresh install still
-    ///      works with zero configuration.
-    ///
-    /// Before this existed, "Relogin to system account" always forced the
-    /// built-in account and silently ignored any account the user had added —
-    /// which is exactly why adding a custom account never changed who the
-    /// parser was signed in as.
+    /// The first account the user added is used, so browsing the Workshop is
+    /// always done as *them* — and that same account is what downloads use,
+    /// which is the point of removing the shared pool. Returns empty
+    /// credentials when nothing has been added yet; callers surface that as an
+    /// "add your account in Settings" message.
     pub fn preferred_parser_credentials(&self) -> AccountCredentials {
-        if let Some(custom) = self.user_store.list().into_iter().next() {
-            return AccountCredentials {
+        self.user_store
+            .list()
+            .into_iter()
+            .next()
+            .map(|custom| AccountCredentials {
                 username: custom.username,
                 password: custom.password,
                 is_custom: true,
-            };
-        }
-        self.parser_credentials()
+            })
+            .unwrap_or_else(|| AccountCredentials {
+                username: String::new(),
+                password: String::new(),
+                is_custom: true,
+            })
     }
-
-    /// Credentials for the dedicated parser login account
-    /// (`weworkshopmanager2`). Used by `steam_auto_login` when no specific
-    /// download account was requested, so the hidden webview always logs
-    /// in under this identity regardless of the user's Download Account
-    /// selection.
-    pub fn parser_credentials(&self) -> AccountCredentials {
-        let bundle = load_builtin_bundle().unwrap_or_default();
-        AccountCredentials {
-            username: bundle.parser.0,
-            password: bundle.parser.1,
-            is_custom: false,
-        }
-    }
-}
-
-fn build_default() -> Vec<AccountCredentials> {
-    load_builtin_bundle()
-        .map(|bundle| {
-            bundle
-                .download
-                .into_iter()
-                .map(|(username, password)| AccountCredentials {
-                    username,
-                    password,
-                    is_custom: false,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn load_builtin_bundle() -> Result<BuiltinAccountsBundle, String> {
-    let raw = general_purpose::STANDARD
-        .decode(BUILTIN_ACCOUNT_BUNDLE)
-        .map_err(|e| e.to_string())?;
-    if raw.len() < 12 {
-        return Err("Built-in account bundle is malformed".into());
-    }
-    let (nonce, ciphertext) = raw.split_at(12);
-    let key = Sha256::digest(BUILTIN_ACCOUNT_BUNDLE_KEY);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-    let plaintext = cipher
-        .decrypt(Nonce::from_slice(nonce), ciphertext)
-        .map_err(|e| e.to_string())?;
-    serde_json::from_slice(&plaintext).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -196,78 +146,68 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// Regression: the download path must pick the custom account when the
-    /// user has added one and selected it, not silently fall back to an
-    /// expired bundled account.
+    /// A freshly installed app has no accounts at all — no hidden pool.
     #[test]
-    fn custom_account_is_reachable_by_its_listed_index() {
+    fn fresh_install_has_no_accounts() {
         let dir = TempDir::new().unwrap();
         let mgr = AccountManager::from_runtime(dir.path());
+        assert_eq!(mgr.builtin_count(), 0);
+        assert!(mgr.list_detailed().is_empty());
+        let creds = mgr.preferred_parser_credentials();
+        assert!(creds.username.is_empty());
+        assert!(creds.password.is_empty());
+    }
 
-        let builtin = mgr.builtin_count();
+    /// The one account a user adds is reachable by the index the download path
+    /// uses, and is also the parser identity.
+    #[test]
+    fn single_user_account_serves_both_download_and_parser() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
         mgr.add_user_account("my_steam_user", "my_password")
             .unwrap();
 
-        // accounts_list enumerates merged(), so the custom account sits right
-        // after the bundled ones.
         let listed = mgr.list_detailed();
-        assert_eq!(listed.len(), builtin + 1);
-        let my_index = listed
-            .iter()
-            .position(|a| a.username == "my_steam_user")
-            .expect("custom account must appear in the list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].username, "my_steam_user");
+        assert!(listed[0].is_custom);
 
-        // credentials(index) must resolve to that exact account — this is what
-        // download_start feeds into starting_index.
-        let creds = mgr.credentials(my_index);
+        // Index 0 is what download_start feeds into starting_index.
+        let creds = mgr.credentials(0);
         assert_eq!(creds.username, "my_steam_user");
         assert!(
             creds.is_custom,
             "must be flagged custom so it is not rotated"
         );
 
-        // And the parser preference must also prefer it.
+        // And the parser session signs in with the very same account.
         let parser = mgr.preferred_parser_credentials();
         assert_eq!(parser.username, "my_steam_user");
+        assert_eq!(parser.password, "my_password");
     }
 
-    /// A fresh install has no custom accounts, so the bundled parser account
-    /// is used — the app still works out of the box.
+    /// Removing the only account leaves the app account-less rather than
+    /// resurrecting some hidden default.
     #[test]
-    fn preferred_parser_falls_back_to_builtin() {
-        let dir = TempDir::new().unwrap();
-        let mgr = AccountManager::from_runtime(dir.path());
-        let creds = mgr.preferred_parser_credentials();
-        let builtin = mgr.parser_credentials();
-        assert_eq!(creds.username, builtin.username);
-        assert!(!creds.is_custom);
-    }
-
-    /// Once the user adds their own account it must win over the bundled one;
-    /// this is the whole point of the A-fix (the parser logs in as the user).
-    #[test]
-    fn preferred_parser_prefers_custom_account() {
-        let dir = TempDir::new().unwrap();
-        let mgr = AccountManager::from_runtime(dir.path());
-        mgr.add_user_account("my_own_account", "secret").unwrap();
-        let creds = mgr.preferred_parser_credentials();
-        assert_eq!(creds.username, "my_own_account");
-        assert_eq!(creds.password, "secret");
-        assert!(creds.is_custom);
-    }
-
-    /// Removing the custom account restores the built-in fallback.
-    #[test]
-    fn preferred_parser_reverts_after_removal() {
+    fn removing_the_only_account_leaves_none() {
         let dir = TempDir::new().unwrap();
         let mgr = AccountManager::from_runtime(dir.path());
         mgr.add_user_account("temp_account", "pw").unwrap();
         assert_eq!(mgr.preferred_parser_credentials().username, "temp_account");
+
         mgr.remove_user_account("temp_account").unwrap();
-        let builtin = mgr.parser_credentials();
-        assert_eq!(
-            mgr.preferred_parser_credentials().username,
-            builtin.username
-        );
+        assert_eq!(mgr.builtin_count(), 0);
+        assert!(mgr.preferred_parser_credentials().username.is_empty());
+        assert!(mgr.credentials(0).username.is_empty());
+    }
+
+    /// The download retry loop asks for the count; with one account it must
+    /// report 1 so the loop makes exactly one attempt instead of cycling.
+    #[test]
+    fn account_count_drives_single_attempt_rotation() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+        mgr.add_user_account("only_one", "pw").unwrap();
+        assert_eq!(mgr.builtin_count(), 1);
     }
 }

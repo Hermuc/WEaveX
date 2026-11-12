@@ -378,10 +378,11 @@ function DownloadAccountSection() {
     }
   };
 
-  const isAutoSelected =
-    state.accounts.find((a) => a.index === state.accountIndex)?.is_custom !==
-    true;
+  // There is no bundled pool any more, so "Auto" now means "no account selected
+  // yet". It only stays checked while the list is empty; as soon as the user adds
+  // an account that account becomes the selection.
   const customAccounts = state.accounts.filter((a) => a.is_custom);
+  const isAutoSelected = customAccounts.length === 0;
 
   return (
     <div className="space-y-2">

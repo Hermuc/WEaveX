@@ -297,7 +297,7 @@ export default {
       "登录 Steam，让解析器可以查看 18+ 内容。",
     download_account: "下载账户",
     download_account_description:
-      "选择用于下载的 Steam 账户。",
+      "选择用于浏览和下载的 Steam 账户。",
     infinite_retry_accounts: "无限次下载尝试",
     infinite_retry_accounts_hint: "循环遍历账户以无限次上传（或重新连接自定义账户）",
     add_custom_account: "添加自定义账户",
@@ -305,10 +305,10 @@ export default {
     add_custom_account_description:
       "输入 Steam 登录凭据。",
     custom_badge: "自定义",
-    auto_account: "自动",
+    auto_account: "未设置",
     not_signed_in: "未登录",
     open_parser: "打开解析器",
-    relogin: "重新登录系统账户",
+    relogin: "重新登录",
     login_button: "登录",
     login_title: "Steam 登录",
     steam_window_title: "请在弹出的 Steam 窗口中完成登录",

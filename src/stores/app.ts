@@ -64,7 +64,7 @@ export const useAppStore = create<AppState>()(
       accent: "indigo",
       weDirectory: "",
       availableLanguages: SUPPORTED_LANGUAGES.map((l) => ({ ...l })),
-      accountIndex: 3,
+      accountIndex: 0,
       infiniteRetryAccounts: false,
       accounts: [],
       sidebarCollapsed: false,

@@ -297,7 +297,7 @@ export default {
       "Log in to Steam for the parser to view 18+ content.",
     download_account: "Download account",
     download_account_description:
-      "Pick a Steam account used for downloading.",
+      "The Steam account used for both browsing and downloading.",
     infinite_retry_accounts: "Endless download attempts",
     infinite_retry_accounts_hint: "Iterate through accounts to upload endlessly in a loop (or reconnect to a custom one)",
     add_custom_account: "Add custom account",
@@ -305,10 +305,10 @@ export default {
     add_custom_account_description:
       "Enter the Steam credentials.",
     custom_badge: "custom",
-    auto_account: "Auto",
+    auto_account: "Not set",
     not_signed_in: "Not signed in",
     open_parser: "Open Parser",
-    relogin: "Relogin to system account",
+    relogin: "Relogin",
     login_button: "Login",
     login_title: "Steam Login",
     steam_window_title: "Finish signing in inside the Steam window",
