@@ -124,7 +124,7 @@ impl AppState {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                match steam_webview.sync_cookies().await {
+                let synced = match steam_webview.sync_cookies().await {
                     Ok(n) => {
                         if n > 0 {
                             log::info!("Synced {} cookies from WebView2 on startup", n);
@@ -132,9 +132,26 @@ impl AppState {
                         } else {
                             log::debug!("No cookies to sync from WebView2");
                         }
+                        n
                     }
                     Err(e) => {
                         log::warn!("Failed to sync cookies from WebView2: {}", e);
+                        0
+                    }
+                };
+
+                // Nothing came back but we hold a backup: the profile was wiped
+                // (a failed startup check used to do that) or WebView2 rebuilt
+                // its store. Restore the copy and re-sync, so a transient failure
+                // no longer costs the user their session.
+                if synced == 0 && steam_webview.restore_cookie_db() {
+                    match steam_webview.sync_cookies().await {
+                        Ok(n) if n > 0 => {
+                            log::info!("Restored {} cookies from backup on startup", n);
+                            workshop.clear_caches();
+                        }
+                        Ok(_) => log::debug!("Backup restored but no cookies were readable"),
+                        Err(e) => log::warn!("Re-sync after restore failed: {}", e),
                     }
                 }
             });

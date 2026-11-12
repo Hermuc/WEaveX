@@ -130,14 +130,79 @@ impl SteamWebview {
     pub async fn prepare_login(&self) -> Result<(), tauri::Error> {
         let _g = self.lock.lock().await;
         self.ensure_window()?;
-        // Drop any existing session first — otherwise Steam keeps showing the
-        // signed-in page at the login URL and the form never renders.
-        let _ = self.logout_locked().await;
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Ok(());
         };
+
+        // Never wipe the profile here.
+        //
+        // This used to call `logout_locked()` unconditionally, which runs
+        // `clear_all_browsing_data()` and therefore destroys the persisted
+        // `steamLoginSecure` cookie. Because the login dialog opens
+        // automatically whenever a startup session check fails (a network blip
+        // is enough), that turned a transient failure into a permanent
+        // sign-out: the user appeared to "randomly lose the login".
+        //
+        // Merely navigating to the login URL is enough for the form to appear;
+        // if a session is still active Steam redirects to the signed-in page,
+        // and `login_fill` handles that case by signing out deliberately (a
+        // real user-initiated action).
         w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))?;
         Ok(())
+    }
+
+    /// Back up the WebView cookie database before anything wipes it.
+    ///
+    /// `clear_all_browsing_data()` is destructive and irreversible: it deletes
+    /// the persisted `steamLoginSecure` cookie along with everything else, so a
+    /// user who signs out by accident (or gets signed out by a failed startup
+    /// check) has to re-authenticate by hand, including Steam Guard. Copying the
+    /// cookie DB first means the session can be restored.
+    fn backup_cookie_db(&self) -> Option<std::path::PathBuf> {
+        let data_dir = dirs::data_local_dir()?.join("WEave");
+        let src = data_dir
+            .join("SteamWebView")
+            .join("EBWebView")
+            .join("Default")
+            .join("Network")
+            .join("Cookies");
+        if !src.is_file() {
+            return None;
+        }
+        let backup = data_dir.join("SteamWebView.cookies.bak");
+        std::fs::copy(&src, &backup).ok()?;
+        log::info!(
+            "[steam-webview] cookie database backed up to {}",
+            backup.display()
+        );
+        Some(backup)
+    }
+
+    /// Put the cookie database back after a destructive clear.
+    pub fn restore_cookie_db(&self) -> bool {
+        let Some(data_dir) = dirs::data_local_dir().map(|d| d.join("WEave")) else {
+            return false;
+        };
+        let backup = data_dir.join("SteamWebView.cookies.bak");
+        if !backup.is_file() {
+            return false;
+        }
+        let dst = data_dir
+            .join("SteamWebView")
+            .join("EBWebView")
+            .join("Default")
+            .join("Network")
+            .join("Cookies");
+        match std::fs::copy(&backup, &dst) {
+            Ok(_) => {
+                log::info!("[steam-webview] cookie database restored from backup");
+                true
+            }
+            Err(e) => {
+                log::warn!("[steam-webview] could not restore cookie database: {e}");
+                false
+            }
+        }
     }
 
     /// Navigate away from the current Steam session **without** taking the
@@ -160,6 +225,9 @@ impl SteamWebview {
         // "log in" and submitted credentials has explicitly asked for a fresh
         // session, so wiping the browsing data here is both safe and required.
         log::info!("[steam-webview] resetting webview state before login");
+
+        // Keep a copy first: the clear below is irreversible.
+        self.backup_cookie_db();
 
         // `steamLoginSecure` is HttpOnly, so `document.cookie = ...; Max-Age=0`
         // cannot remove it — the JS deletion attempt is a no-op for exactly the

@@ -324,14 +324,32 @@ async function syncSteamSession() {
     return;
   }
   session.setLoggingIn();
+
+  // Probe with retries before concluding the user is signed out.
+  //
+  // A single failed request is usually a network blip (or Steam rate-limiting
+  // the profile endpoint), not an invalid session. Treating it as "logged out"
+  // opened the login dialog, which used to wipe the stored cookies and turn a
+  // transient hiccup into a permanent sign-out.
+  const probeAccount = async (): Promise<SteamAccountInfo | null> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const info = await tryInvoke<SteamAccountInfo | null>(
+        "steam_current_account",
+        undefined,
+        null,
+      );
+      if (info) return info;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+      }
+    }
+    return null;
+  };
+
   try {
     // First check if we have a valid session by hitting Steam directly.
     // This is more reliable than trusting the cookie alone.
-    let info = await tryInvoke<SteamAccountInfo | null>(
-      "steam_current_account",
-      undefined,
-      null,
-    );
+    let info = await probeAccount();
 
     if (info) {
       // Session is valid — we're already logged in.
@@ -349,11 +367,7 @@ async function syncSteamSession() {
 
     // Verify the session is actually valid after auto-login.
     if (ok) {
-      info = await tryInvoke<SteamAccountInfo | null>(
-        "steam_current_account",
-        undefined,
-        null,
-      );
+      info = await probeAccount();
       if (info) {
         session.setLoggedIn(info);
         return;
@@ -367,13 +381,12 @@ async function syncSteamSession() {
     }
 
     if (ok) {
-      info = await tryInvoke<SteamAccountInfo | null>(
-        "steam_current_account",
-        undefined,
-        null,
-      );
+      info = await probeAccount();
       session.setLoggedIn(info ?? null);
     } else {
+      // Only report an error after a real login attempt failed. Do NOT clear
+      // anything here: the stored session may still be perfectly valid and the
+      // next launch (or a later probe) can pick it up again.
       session.setError();
     }
   } catch {

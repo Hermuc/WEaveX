@@ -107,10 +107,26 @@ export default function App() {
 
   const hasAutoOpened = useRef(false);
   useEffect(() => {
-    if (ready && sessionPhase === "error" && showLoginPromptOnFail && !hasAutoOpened.current) {
+    if (
+      !ready ||
+      sessionPhase !== "error" ||
+      !showLoginPromptOnFail ||
+      hasAutoOpened.current
+    ) {
+      return;
+    }
+    // Wait before prompting. A session check can fail for purely transient
+    // reasons (network blip, Steam rate-limiting the profile endpoint), and the
+    // dialog used to open instantly and — because preparing it wiped the stored
+    // cookies — turn a hiccup into a real sign-out. Giving it a moment lets a
+    // retry succeed, and the modal is then never shown.
+    const timer = setTimeout(() => {
+      const state = useSteamSessionStore.getState();
+      if (state.phase !== "error" || hasAutoOpened.current) return;
       hasAutoOpened.current = true;
       setLoginModalOpen(true, "auto");
-    }
+    }, 5000);
+    return () => clearTimeout(timer);
   }, [ready, sessionPhase, showLoginPromptOnFail, setLoginModalOpen]);
 
   const setPage = useFiltersStore((s) => s.setPage);
