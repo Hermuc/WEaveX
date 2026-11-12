@@ -87,17 +87,16 @@ pub struct ResolvedVideo {
     /// Prefetching ahead concurrently (as DepotDownloader does with
     /// -max-downloads) and memoising the results keeps playback fed.
     cache: Arc<parking_lot::Mutex<std::collections::HashMap<usize, Arc<Vec<u8>>>>>,
+    /// Bytes currently held in `cache`, so it can be bounded.
+    cached_bytes: Arc<std::sync::atomic::AtomicU64>,
+    /// Cancelled when the stream is torn down, so background prefetch stops
+    /// instead of racing to the end of the file after the player closed.
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// True while a prefetch task is alive (single-flight guard).
+    prefetching: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ResolvedVideo {
-    /// Chunk spans whose byte range intersects `[start, end)`.
-    fn spans_for(&self, start: u64, end: u64) -> impl Iterator<Item = &ChunkSpan> {
-        self.info.spans.iter().filter(move |s| {
-            let span_end = s.offset + s.len;
-            span_end > start && s.offset < end
-        })
-    }
-
     /// Fetch, decrypt and decompress one chunk.
     ///
     /// All endpoints are raced concurrently and the first complete response wins.
@@ -162,6 +161,37 @@ impl ResolvedVideo {
         Err(anyhow::anyhow!("{last_err}"))
     }
 
+    /// Bytes of decoded chunks to keep. A 2GB wallpaper must not be pinned in
+    /// RAM, so the cache evicts everything once it exceeds this budget. Playback
+    /// re-fetches in the rare case it seeks back past the window, which is much
+    /// cheaper than an out-of-memory kill.
+    const CACHE_LIMIT: u64 = 128 * 1024 * 1024;
+
+    /// Insert into the cache, evicting the whole map when over budget.
+    fn remember(&self, idx: usize, data: Arc<Vec<u8>>) {
+        let size = data.len() as u64;
+        let mut map = self.cache.lock();
+        if map.contains_key(&idx) {
+            return;
+        }
+        let current = self.cached_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        if current + size > Self::CACHE_LIMIT {
+            map.clear();
+            self.cached_bytes
+                .store(size, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.cached_bytes
+                .store(current + size, std::sync::atomic::Ordering::Relaxed);
+        }
+        map.insert(idx, data);
+    }
+
+    /// Stop any background prefetch (called when the stream is torn down).
+    pub fn cancel(&self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Fetch one chunk by index, using the cache and falling back to the network.
     async fn chunk_at(self: &Arc<Self>, idx: usize) -> anyhow::Result<Arc<Vec<u8>>> {
         if let Some(hit) = self.cache.lock().get(&idx).cloned() {
@@ -181,7 +211,7 @@ impl ResolvedVideo {
             match self.fetch_chunk(span).await {
                 Ok(bytes) => {
                     let data = Arc::new(bytes);
-                    self.cache.lock().insert(idx, data.clone());
+                    self.remember(idx, data.clone());
                     return Ok(data);
                 }
                 Err(e) => {
@@ -199,32 +229,38 @@ impl ResolvedVideo {
     /// Warm `count` chunks starting at `from` concurrently in the background.
     ///
     /// Steam rate-limits a single connection hard enough that sequential
-    /// fetching is unusable for playback (measured 1s then 44s per chunk), while
-    /// the official downloader opens many connections at once. This mirrors
-    /// that: several chunks in flight, results memoised for the reader.
+    /// fetching is unusable for playback (measured 1s then 44s per chunk), so
+    /// several chunks are fetched at once and memoised for the reader.
+    ///
+    /// At most one prefetch task runs at a time: players issue many overlapping
+    /// Range requests, and spawning a task per request piled up dozens of
+    /// duplicate fetches for the same chunks.
     fn prefetch(self: &Arc<Self>, from: usize, count: usize) {
         const CONCURRENCY: usize = 6;
         let total = self.info.spans.len();
         let end = (from + count).min(total);
-        if from >= end {
+        if from >= end || self.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        // Single-flight: skip if a prefetcher is already running.
+        if self
+            .prefetching
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
             return;
         }
         let this = self.clone();
         tokio::spawn(async move {
             let mut next = from;
-            loop {
+            while next < end && !this.cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 let mut batch = Vec::new();
                 while batch.len() < CONCURRENCY && next < end {
-                    // Skip what is already cached.
                     if !this.cache.lock().contains_key(&next) {
                         batch.push(next);
                     }
                     next += 1;
                 }
                 if batch.is_empty() {
-                    if next >= end {
-                        break;
-                    }
                     continue;
                 }
                 let futs = batch.into_iter().map(|i| {
@@ -234,10 +270,9 @@ impl ResolvedVideo {
                     }
                 });
                 futures_util::future::join_all(futs).await;
-                if next >= end {
-                    break;
-                }
             }
+            this.prefetching
+                .store(false, std::sync::atomic::Ordering::Release);
         });
     }
 
@@ -292,12 +327,18 @@ impl ResolvedVideo {
         })
     }
     /// Read `len` bytes starting at `offset`, fetching only overlapping chunks.
-    pub async fn read_range(&self, offset: u64, len: u64) -> anyhow::Result<Vec<u8>> {
+    pub async fn read_range(self: &Arc<Self>, offset: u64, len: u64) -> anyhow::Result<Vec<u8>> {
         let end = (offset + len).min(self.info.total_size);
         let mut out = Vec::with_capacity((end.saturating_sub(offset)) as usize);
-        for span in self.spans_for(offset, end) {
-            let data = self.fetch_chunk(span).await?;
+        // Route through the cache so a repeated read (seek back, or a player
+        // re-requesting a window) does not re-download. Using fetch_chunk
+        // directly here bypassed it entirely.
+        for (i, span) in self.info.spans.iter().enumerate() {
             let span_end = span.offset + span.len;
+            if span_end <= offset || span.offset >= end {
+                continue;
+            }
+            let data = self.chunk_at(i).await?;
             let from = offset.max(span.offset) - span.offset;
             let to = (end.min(span_end) - span.offset).min(data.len() as u64);
             if from < to {
@@ -817,6 +858,9 @@ pub async fn resolve_video(
                 http: Arc::new(serving_http),
                 preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+                cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
         }
     }
@@ -920,5 +964,8 @@ pub async fn resolve_video(
         http: Arc::new(http),
         preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+        cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }

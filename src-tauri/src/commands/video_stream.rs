@@ -81,7 +81,17 @@ pub async fn video_stream_prewarm(
         reg.pending.lock().remove(&item_id);
         match result {
             Ok(video) => {
-                reg.ready.lock().insert(item_id, Arc::new(video));
+                // Browsing many wallpapers must not pin a resolved video (and
+                // its manifest) per item forever. Keep only the most recent
+                // few; the rest re-resolve from the on-disk layout cache.
+                const MAX_READY: usize = 4;
+                let mut ready = reg.ready.lock();
+                if ready.len() >= MAX_READY {
+                    if let Some(oldest) = ready.keys().next().copied() {
+                        ready.remove(&oldest);
+                    }
+                }
+                ready.insert(item_id, Arc::new(video));
                 log::info!("[video-stream] prewarm ready for {item_id}");
             }
             Err(e) => log::warn!("[video-stream] prewarm failed for {item_id}: {e}"),

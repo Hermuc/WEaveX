@@ -210,7 +210,11 @@ function AccountSection({ onOpenParser }: { onOpenParser: () => void }) {
         state.setAccountIndex(0);
         void persist("settings.account.account.account_number", 0);
       }
+      // The removed account may have been the one holding the web session, so
+      // re-read the session too; otherwise the row keeps claiming "signed in"
+      // for an account that no longer exists.
       await refreshAccounts();
+      await refreshSession();
     } else {
       pushToast(
         `${t("messages.error") || "Could not remove account"}: ${res.error}`,

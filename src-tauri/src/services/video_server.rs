@@ -24,6 +24,8 @@ use super::video_stream::ResolvedVideo;
 pub struct VideoServer {
     pub port: u16,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Kept so teardown can cancel in-flight prefetch work.
+    video: Arc<ResolvedVideo>,
 }
 
 impl VideoServer {
@@ -34,6 +36,9 @@ impl VideoServer {
 
     /// Stop the server.
     pub fn stop(&mut self) {
+        // Cancel background prefetch too, or it keeps downloading the rest of
+        // the file after the player has gone.
+        self.video.cancel();
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
@@ -60,6 +65,7 @@ pub async fn serve_arc(video: Arc<ResolvedVideo>) -> anyhow::Result<VideoServer>
         content_type: content_type_for(&filename),
     });
 
+    let video_for_cancel = state.video.clone();
     let app = Router::new()
         .route("/video", get(handle_video).head(handle_head))
         .with_state(state);
@@ -80,6 +86,7 @@ pub async fn serve_arc(video: Arc<ResolvedVideo>) -> anyhow::Result<VideoServer>
     Ok(VideoServer {
         port,
         shutdown: Some(tx),
+        video: video_for_cancel,
     })
 }
 
@@ -155,6 +162,17 @@ async fn handle_video(State(st): State<Arc<ServerState>>, headers: HeaderMap) ->
     // failed and the tail (moov) was unreachable. Headers are sent immediately
     // either way, and the body streams chunk by chunk, so there is no need to
     // pre-download anything.
+    // An unsatisfiable Range must be answered with 416, not by silently
+    // serving the whole file: players probe past EOF deliberately, and treating
+    // that as "send everything" made them pull the entire video.
+    if has_range && range.is_none() {
+        let mut h = HeaderMap::new();
+        if let Ok(v) = HeaderValue::from_str(&format!("bytes */{}", st.total)) {
+            h.insert(header::CONTENT_RANGE, v);
+        }
+        return (StatusCode::RANGE_NOT_SATISFIABLE, h).into_response();
+    }
+
     let (start, end) = match range {
         Some((s, e)) => (s, e),
         None => (0, st.total.saturating_sub(1)),
