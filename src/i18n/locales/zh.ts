@@ -201,7 +201,6 @@ export default {
     bulk_delete_has_workshop: "所选中有 {{count}} 个是 Steam 创意工坊壁纸，不能在这里删除。",
     source_workshop: "创意工坊",
     source_defaultprojects: "内置",
-    source_myprojects: "已下载",
 
     download_started: "下载已开始！",
     extraction_started: "解包已开始！",

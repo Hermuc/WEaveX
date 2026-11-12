@@ -817,28 +817,27 @@ pub fn delete_wallpaper_folder(projects_path: &Path, pubfileid: &str) -> anyhow:
 
 #[cfg(test)]
 mod tests {
+    /// Regression: the Age Rating filter reads content_rating, so every scanned
+    /// wallpaper must resolve to a known rating (project.json value, or the
+    /// "Everyone" default applied to Wallpaper Engine's bundled samples).
     #[test]
-    fn verify_content_rating_populated() {
+    fn every_installed_wallpaper_has_a_content_rating() {
         let client = WallpaperEngineClient::new(WallpaperEngineClient::detect_installation());
-        let list = client.installed_wallpapers();
-        let mut everyone = 0;
-        let mut mature = 0;
-        let mut missing = 0;
-        for w in &list {
-            match w.content_rating.as_str() {
-                "Everyone" => everyone += 1,
-                "Mature" | "Questionable" => mature += 1,
-                _ => missing += 1,
-            }
-        }
-        println!(
-            "CHECK total={} Everyone={} Mature={} missing={}",
-            list.len(),
-            everyone,
-            mature,
-            missing
+        let unrated: Vec<String> = client
+            .installed_wallpapers()
+            .into_iter()
+            .filter(|w| {
+                !matches!(
+                    w.content_rating.as_str(),
+                    "Everyone" | "Questionable" | "Mature"
+                )
+            })
+            .map(|w| format!("{} ({:?})", w.pubfileid, w.content_rating))
+            .collect();
+        assert!(
+            unrated.is_empty(),
+            "wallpapers without a usable rating: {unrated:?}"
         );
-        assert_eq!(missing, 0, "every wallpaper must have a rating");
     }
 
     use super::*;

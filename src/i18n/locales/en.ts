@@ -201,7 +201,6 @@ export default {
     bulk_delete_has_workshop: "{{count}} selected wallpapers are Steam Workshop items and cannot be deleted here.",
     source_workshop: "Steam Workshop",
     source_defaultprojects: "Bundled",
-    source_myprojects: "Downloaded",
 
     download_started: "Download started!",
     extraction_started: "Extraction started!",
