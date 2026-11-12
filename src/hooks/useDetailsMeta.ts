@@ -13,7 +13,6 @@ import { useInstalledStore } from "@/stores/installed";
 import { formatBytes, formatTimestamp } from "@/lib/utils";
 import { groupTags, parseRatingStars, workshopUrl } from "@/lib/workshop";
 import { pushToast } from "@/stores/toasts";
-import { useAppStore } from "@/stores/app";
 
 type DetailsKind = "workshop" | "installed";
 
@@ -316,14 +315,6 @@ export function useDetailsMeta({ kind, item, onClose }: UseDetailsMetaProps) {
     }
     return rows;
   }, [meta, showInstalledActions, t]);
-
-  useEffect(() => {
-    const store = useAppStore.getState();
-    store.setActiveDetailsCover(meta?.preview || null);
-    return () => {
-      store.setActiveDetailsCover(null);
-    };
-  }, [meta?.preview]);
 
   return {
     meta,

@@ -12,6 +12,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::download::{Phase, TaskStatus};
+use crate::services::fs_util::dir_has_files;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExtractCompleted {
@@ -195,43 +196,5 @@ impl ExtractManager {
         });
 
         Ok(())
-    }
-}
-
-/// Recursively returns true if the directory contains at least one regular
-/// file. Mirrors the helper used by the download manager.
-fn dir_has_files(dir: &std::path::Path) -> bool {
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in read.flatten() {
-        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-            return true;
-        }
-        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) && dir_has_files(&entry.path()) {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_dir_has_files() {
-        let dir = tempdir().unwrap();
-        assert!(!dir_has_files(dir.path()));
-
-        let subdir = dir.path().join("sub");
-        fs::create_dir(&subdir).unwrap();
-        assert!(!dir_has_files(dir.path()));
-
-        let file = subdir.join("file.txt");
-        fs::write(&file, "test").unwrap();
-        assert!(dir_has_files(dir.path()));
     }
 }

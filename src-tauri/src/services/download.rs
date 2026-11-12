@@ -16,6 +16,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::services::fs_util::{dir_has_files, dir_has_project};
+
 static PROGRESS_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(\d{1,3}(?:[.,]\d+)?)\s*%").expect("progress regex"));
 
@@ -537,53 +539,5 @@ impl DownloadManager {
 
     fn emit_status(&self, status: &TaskStatus) {
         self.app.emit("download://status", status).ok();
-    }
-}
-
-/// True when the folder holds a real project (project.json present).
-///
-/// Used to decide whether a failed download left anything worth keeping: a
-/// folder with only a partial .DepotDownloader cache is unplayable and would
-/// pollute the Installed view.
-fn dir_has_project(dir: &std::path::Path) -> bool {
-    dir.join("project.json").is_file()
-}
-
-/// Returns true if the directory exists and contains at least one regular
-/// file. Used to detect "the plugin actually produced output" even when the
-/// exit code is misleading.
-fn dir_has_files(dir: &std::path::Path) -> bool {
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in read.flatten() {
-        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-            return true;
-        }
-        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) && dir_has_files(&entry.path()) {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_dir_has_files() {
-        let dir = tempdir().unwrap();
-        assert!(!dir_has_files(dir.path()));
-
-        let subdir = dir.path().join("sub");
-        fs::create_dir(&subdir).unwrap();
-        assert!(!dir_has_files(dir.path()));
-
-        let file = subdir.join("file.txt");
-        fs::write(&file, "test").unwrap();
-        assert!(dir_has_files(dir.path()));
     }
 }

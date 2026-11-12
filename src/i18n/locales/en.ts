@@ -335,9 +335,6 @@ export default {
     account_exists: "This account already exists",
     confirm_remove_account: "Remove this account?",
     initialize_now: "Initialize Now",
-    login_qr: "Login with QR",
-    login_qr_desc: "Scan this code with your Steam Mobile App to sign in.",
-    generating_qr: "Generating QR code…",
   },
   info: {
     description:
@@ -605,7 +602,7 @@ export default {
   },
   faq: {
     login_issues_q: "Steam login error occurs in the app",
-    login_issues_a: "If you do not need 18+ content, you don't have to worry about this and can simply ignore it.\n\nIf you need 18+ content, try these options one by one:\n\n1) Simply restart the program\n2) Go to the settings and click \"Relogin to system account\"\n3) Open the data folder (the \"Open Data folder\" button in the \"About\" window) and delete the «SteamWebView» folder (after closing WEave) (this will reset the built-in browser cache). Restart the program.\n\nIf the issue persists for a long time, there are likely problems with the parser's system account. Try providing your own Steam account in the parser settings (Accounts -> Login). You can use any account (even a dummy one), as long as there are no restrictions on 18+ content in your account settings.\n\nIf necessary, more system accounts with automatic selection will be created in the future.",
+    login_issues_a: "If you do not need 18+ content, you can ignore this issue.\n\nIf you need 18+ content, try these in order:\n\n1) Simply restart the program\n2) Go to Settings -> Account and re-login the Steam account you added\n3) Close WEave, open the data folder (the \"Open Data folder\" button in the \"About\" window), delete the «SteamWebView» folder (this resets the built-in browser cache), then restart the program.\n\nIf the problem persists, the account you added likely has restricted access to 18+ content. Check that 18+ content restrictions are not enabled on that account in your Steam account settings.",
     extract_q: "Why does the \"Extract\" button not work for some downloaded wallpapers?",
     extract_a: "Not all wallpapers in the Workshop are full-fledged projects (with a project.json file). There are video wallpapers (MP4) or web wallpapers (HTML). They are already ready to use, and there is no need (and technically impossible) to unpack them as Wallpaper Engine projects.",
     storage_q: "Where are downloaded wallpapers stored?",

@@ -62,13 +62,13 @@ pub async fn steam_current_account(
     Ok(state.workshop.current_account().await)
 }
 
-/// Attempt to sign the hidden webview into Steam. When an `account_index`
-/// is supplied the requested download account is used — otherwise we fall
-/// back to the dedicated parser account (`weworkshopmanager2`), which is
-/// intentionally kept out of the download-account list. Returns true on
-/// success. Safe to call repeatedly — no-ops if we're already logged in.
-/// When `force` is true, the current session is terminated first and a
-/// fresh login is always attempted.
+/// Attempt to sign the hidden webview into Steam.
+///
+/// When `account_index` is supplied that account is used; otherwise the first
+/// account the user added is used (there is no bundled fallback). Returns true
+/// on success. Safe to call repeatedly — no-ops if already logged in. When
+/// `force` is true the current session is terminated first and a fresh login
+/// is always attempted.
 #[tauri::command]
 pub async fn steam_auto_login(
     state: AppStateHandle<'_>,
@@ -90,11 +90,9 @@ pub async fn steam_auto_login(
         }
     }
     // Account selection:
-    //   Some(i) -> the account at that index (built-in list + user accounts)
-    //   None    -> the user's own account if they added one, else the bundled
-    //              parser account. Using `preferred_parser_credentials` here is
-    //              what makes "Relogin to system account" honour a custom
-    //              account instead of always forcing the shared public one.
+    //   Some(i) -> the account at that index in the user's account list
+    //   None    -> the first account the user added (there is no bundled pool,
+    //              so this is simply that account, or empty if none exists).
     let creds = match account_index {
         Some(i) => state.accounts.credentials(i),
         None => state.accounts.preferred_parser_credentials(),
@@ -117,10 +115,10 @@ pub async fn steam_auto_login(
 
 /// Sign in to Steam **with the credentials the user typed**.
 ///
-/// This is the manual path and it must never be re-routed through the bundled
-/// account: the previous flow dropped the typed credentials and called
-/// `steam_auto_login(accountIndex: None)`, which substitutes the built-in
-/// parser account — so a manual login could never succeed as the user.
+/// This is the manual path and must never be re-routed through a stored
+/// account: an earlier flow dropped the typed credentials and called
+/// `steam_auto_login(accountIndex: None)`, so a manual login could never
+/// succeed as the user.
 #[tauri::command]
 pub async fn steam_login_fill(
     state: AppStateHandle<'_>,

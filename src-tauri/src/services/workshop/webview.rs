@@ -123,8 +123,8 @@ impl SteamWebview {
     /// This used to call `clear_all_browsing_data()` first, which wiped the
     /// persisted WebView2 profile — including a perfectly good
     /// `steamLoginSecure` cookie — every single time the login dialog opened.
-    /// That made "Relogin to system account" log itself out before it even
-    /// tried, and made a successful manual login vanish on the next open.
+    /// That made "Relogin" log itself out before it even tried, and made a
+    /// successful manual login vanish on the next open.
     /// We now only navigate; clearing the profile is an explicit, opt-in
     /// action (see `force` in `auto_login`).
     pub async fn prepare_login(&self) -> Result<(), tauri::Error> {

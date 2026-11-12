@@ -336,7 +336,7 @@ function DownloadAccountSection() {
             checked={isAutoSelected}
             onChange={selectAuto}
           />
-          <span className="flex-1">{t("settings.auto_account") || "Auto"}</span>
+          <span className="flex-1">{t("settings.auto_account") || "Not set"}</span>
         </label>
         {customAccounts.map((a) => (
           <div

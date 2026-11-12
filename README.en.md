@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 <details>
 <summary><b>Download Management</b></summary>
 
-- **Steam Accounts Support**: Built-in public accounts + ability to add custom accounts (supporting Steam Guard / QR-code authentication).
+- **Steam Accounts Support**: Add your own Steam account — one sign-in powers both Workshop browsing and downloads (Steam Guard supported).
 - **Progress Tracking**: Real-time progress display (amount downloaded) and download cancellation.
 - **Auto-Apply**: Optional feature to automatically apply the latest downloaded wallpaper.
 

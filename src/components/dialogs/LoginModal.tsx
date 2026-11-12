@@ -315,7 +315,7 @@ export default function LoginModal({
             {step === "credentials" && (
               <p className="pt-1 text-[11px] leading-relaxed text-subtle/80">
                 {t("settings.login_account_hint") ||
-                  "填写你自己的 Steam 账号即可；留空直接点「重新登录系统账户」时，会优先使用你在「账户」里添加的自定义账号。"}
+                  "填写你自己的 Steam 账号，或直接点「重新登录」使用你在「账户」里已添加的账号。"}
               </p>
             )}
           </div>
@@ -371,7 +371,7 @@ export default function LoginModal({
                       {busy && (
                         <span className="mr-1 inline-block size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
                       )}
-                      {t("settings.relogin") || "Relogin to system account"}
+                      {t("settings.relogin") || "Relogin"}
                     </button>
                     <div className="flex gap-2">
                       <button

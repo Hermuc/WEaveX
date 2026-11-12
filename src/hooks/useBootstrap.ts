@@ -115,13 +115,12 @@ export function useBootstrap() {
       }
       useAppStore.setState(patch);
 
-      // Sign the hidden Steam webview into the dedicated parser account
-      // (weworkshopmanager2) on startup so 18+ content is visible and the
-      // scraper has a valid session. `accountIndex: null` tells the backend
-      // to use the parser credentials rather than the currently-selected
-      // download account. If login requires Steam Guard or the password is
-      // stale this simply returns false — the user can still log in manually
-      // via Settings → Steam web session.
+      // Sign the hidden Steam webview in on startup so 18+ content is visible
+      // and the scraper has a valid session. `accountIndex: null` tells the
+      // backend to use the first account the user added (there is no bundled
+      // fallback), so no separate parser account exists. If login requires
+      // Steam Guard or the password is stale this returns false — the user can
+      // still sign in from Settings → Account.
       //
       // We drive the sidebar status section from this lifecycle: spinner
       // while in flight, then signed-in / unknown-account / error once it

@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod download;
 pub mod extract;
+pub mod fs_util;
 pub mod i18n;
 pub mod metadata;
 pub mod qr;

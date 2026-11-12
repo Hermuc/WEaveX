@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 <details>
 <summary><b>下载管理</b></summary>
 
-- **Steam 账号支持**：内置公共账号 + 可添加自定义账号（支持 Steam 令牌 / 二维码认证）。
+- **Steam 账号支持**：添加你自己的 Steam 账号，一次登录同时用于浏览创意工坊和下载（支持 Steam 令牌）。
 - **进度跟踪**：实时显示下载进度（已下载量），并可取消下载。
 - **自动应用**：可选功能，自动应用最新下载完成的壁纸。
 
