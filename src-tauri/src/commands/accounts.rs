@@ -16,8 +16,6 @@ use crate::plugin_paths;
 type ChildHandle = Arc<AsyncMutex<Option<Child>>>;
 static AUTH_HANDLES: Lazy<Mutex<HashMap<String, ChildHandle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-static QR_LOGIN_HANDLE: Lazy<Mutex<ChildHandle>> =
-    Lazy::new(|| Mutex::new(Arc::new(AsyncMutex::new(None))));
 
 #[derive(Serialize)]
 pub struct AccountSummary {
@@ -54,17 +52,30 @@ pub fn accounts_set_current(state: AppStateHandle<'_>, index: u32) {
     state.settings.read().set_account_number(index);
 }
 
-/// Add a new user account. The password is stored encrypted via
-/// `UserAccountsStore` (PBKDF2 + AES-256-GCM, machine-bound key).
+/// Add a user account and sign in with it.
+///
+/// This is the single sign-in entry point. The password is stored encrypted via
+/// `UserAccountsStore` (PBKDF2 + AES-256-GCM, machine-bound key), and the same
+/// credentials are then used to establish the Workshop parser session, so one
+/// account covers both browsing and downloading.
 #[command]
-pub fn accounts_set_custom(
+pub async fn accounts_set_custom(
     state: AppStateHandle<'_>,
     username: String,
     password: String,
 ) -> Result<(), String> {
+    let user = username.trim().to_string();
+    state.accounts.add_user_account(&user, password.as_str())?;
+
+    // login_fill shows Steam's real window, which is exactly what the Steam
+    // Guard step needs. It returns Ok(true) when no guard was required; either
+    // way the session is established (or the user finishes it in that window).
     state
-        .accounts
-        .add_user_account(username.trim(), password.as_str())
+        .steam_webview
+        .login_fill(&user, password.as_str())
+        .await?;
+
+    Ok(())
 }
 
 /// Remove a single user account by username.
@@ -87,312 +98,6 @@ pub fn accounts_list_custom(state: AppStateHandle<'_>) -> Vec<String> {
 }
 
 #[command]
-pub async fn accounts_login_qr(state: AppStateHandle<'_>, app: AppHandle) -> Result<(), String> {
-    let depot_exe = plugin_paths::depot_downloader().map_err(|e| e.to_string())?;
-
-    log::info!(
-        "[auth-qr] Starting DepotDownloader at: {}",
-        depot_exe.display()
-    );
-
-    // Launch DepotDownloader DIRECTLY (not via `cmd /c "chcp ... && ..."`).
-    // The cmd wrapper was the real cause of the blank QR: Rust escapes the inner
-    // quotes around the exe path, which cmd.exe does not understand, so the
-    // executable was never actually started - you'd see "Spawned successfully"
-    // (that is just cmd) followed by zero DepotDownloader output. This mirrors
-    // the working username/password login (accounts_verify_custom). We read raw
-    // bytes and decode per line downstream, so the chcp 65001 trick is not
-    // needed: block glyphs arrive either as UTF-8 or as a single OEM code-page
-    // byte (which becomes U+FFFD and is mapped back to a block).
-    let mut cmd = Command::new(&depot_exe);
-    cmd.args(["-app", "730", "-depot", "0", "-remember-password", "-qr"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-
-    // DepotDownloaderMod needs the bundled .NET runtime root to start.
-    if let Some(ref root) = *state.dotnet_root.lock() {
-        cmd.env("DOTNET_ROOT", root);
-    }
-
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            let err_msg = format!("Failed to spawn DepotDownloader: {}", e);
-            log::error!("[auth-qr] {}", err_msg);
-            return Err(err_msg);
-        }
-    };
-    log::info!("[auth-qr] Spawned successfully");
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let child_handle = Arc::new(AsyncMutex::new(Some(child)));
-
-    {
-        let mut qr_handle = QR_LOGIN_HANDLE.lock();
-        *qr_handle = child_handle.clone();
-    }
-
-    // Merge stdout and stderr
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
-
-    if let Some(mut out) = stdout {
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            // Read raw bytes and split into lines at the BYTE level (0x0A). A
-            // newline byte can never appear inside a multi-byte UTF-8 sequence,
-            // so this is safe and - crucially - we only decode COMPLETE lines.
-            // Decoding arbitrary 1024-byte chunks would split the 3-byte block
-            // glyph (U+2588) across reads and corrupt the QR code.
-            let mut buf = [0u8; 1024];
-            let mut pending: Vec<u8> = Vec::new();
-            while let Ok(n) = out.read(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                pending.extend_from_slice(&buf[..n]);
-                while let Some(pos) = pending.iter().position(|&b| b == b'\n') {
-                    // drain the line including its trailing newline byte
-                    let mut line_bytes: Vec<u8> = pending.drain(..=pos).collect();
-                    line_bytes.pop(); // remove '\n'
-                    if line_bytes.last() == Some(&b'\r') {
-                        line_bytes.pop(); // remove '\r'
-                    }
-                    let line = String::from_utf8_lossy(&line_bytes).into_owned();
-                    // Send ALL lines, including whitespace-only (QR border lines)
-                    let _ = tx.send(line).await;
-                }
-            }
-            if !pending.is_empty() {
-                if pending.last() == Some(&b'\r') {
-                    pending.pop();
-                }
-                let line = String::from_utf8_lossy(&pending).into_owned();
-                let _ = tx.send(line).await;
-            }
-        });
-    }
-
-    if let Some(mut err) = stderr {
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            use tokio::io::AsyncBufReadExt;
-            let mut reader = tokio::io::BufReader::new(&mut err);
-            let mut line = String::new();
-            while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 {
-                    break;
-                }
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    let _ = tx.send(trimmed).await;
-                }
-                line.clear();
-            }
-        });
-    }
-    drop(tx);
-
-    // Process merged lines
-    tokio::spawn(async move {
-        let mut capturing_qr = false;
-        let mut qr_data = String::new();
-        let mut qr_emitted = false;
-        let mut empty_line_count = 0;
-        // Account name parsed from the QR success banner. The banner is printed
-        // *before* the refresh token is written to disk, so we only remember the
-        // name here and wait for the real "logged in" confirmation before we stop
-        // the process - otherwise we could kill it mid-save and break
-        // -remember-password for future downloads.
-        let mut qr_username = "qr_user".to_string();
-
-        // We use a timeout on recv() so that a "quiet" stdout (DepotDownloader
-        // prints the QR and then silently waits for the phone scan) still lets us
-        // flush the captured QR to the UI. Relying on trailing blank quiet-zone
-        // lines was unreliable: terminals/pipes strip or buffer them, so the QR
-        // was captured but never emitted -> the modal spun forever.
-        use tokio::time::{timeout, Duration};
-        loop {
-            let line = match timeout(Duration::from_millis(400), rx.recv()).await {
-                Ok(Some(line)) => line,
-                Ok(None) => break, // channel closed: the process has exited
-                Err(_) => {
-                    // No new output for 400ms. If a QR has been captured but not
-                    // yet shown, emit it now (no dependence on trailing blanks).
-                    if capturing_qr && !qr_emitted && qr_data.contains('\u{2588}') {
-                        app.emit("auth://qr_ready", &qr_data).ok();
-                        qr_emitted = true;
-                    }
-                    continue;
-                }
-            };
-            let lower = line.to_lowercase();
-            // ALWAYS log the raw output from DepotDownloader so the developer
-            // can see if it's crashing, asking for input, or failing to start.
-
-            if lower.contains("unhandled exception") || lower.contains("fatal error") {
-                app.emit("auth://qr_failed", "DepotDownloader crashed").ok();
-                break;
-            }
-
-            // --- Success / failure detection ---
-            // These can appear whether or not we are still mid-capture, so they
-            // are checked first.
-            //
-            // The original code only looked for a single line containing
-            // "logging" + "done!" + "steam3". DepotDownloaderMod prints those as
-            // *separate* lines, so that condition was never true and the QR login
-            // never completed (the account was never added). The QR flow instead
-            // prints:
-            //   "Success! Next time you can login with -username <name> ..."  (name)
-            //   ...token saved to disk...
-            //   " Done!" / "Got <n> licenses for account!"                    (logged in)
-            //
-            // We grab the username from the banner, then finish only once the
-            // account is fully logged in so the saved token is intact.
-            if lower.contains("success! next time you can login") {
-                if let Some(idx) = lower.find("-username ") {
-                    let rest = &line[idx + "-username ".len()..];
-                    if let Some(name) = rest.split_whitespace().next() {
-                        if !name.is_empty() {
-                            qr_username = name.to_string();
-                        }
-                    }
-                }
-            }
-
-            // Definitive "logged in" confirmation, printed after the refresh
-            // token has been persisted. Safe to emit success and stop here.
-            if lower.contains("licenses for account") {
-                app.emit("auth://qr_success", &qr_username).ok();
-                break;
-            }
-
-            if lower.contains("failed to authenticate")
-                || lower.contains("authentication failed")
-                || lower.contains("access token was rejected")
-            {
-                app.emit("auth://qr_failed", "Authentication failed").ok();
-                break;
-            }
-
-            if capturing_qr {
-                let is_empty_or_spaces = line.chars().all(|ch| ch == ' ');
-                let has_blocks = line.contains('█')
-                    || line.contains('▄')
-                    || line.contains('▀')
-                    || line.contains('�');
-
-                if is_empty_or_spaces || has_blocks {
-                    // If the terminal encoding messed up the blocks, fix them
-                    let fixed_line = line.replace('\u{FFFD}', "\u{2588}");
-                    qr_data.push_str(&fixed_line);
-                    qr_data.push('\n');
-
-                    if is_empty_or_spaces && !has_blocks {
-                        // Only start counting trailing blank lines once actual QR
-                        // modules have been captured. The QR is rendered with a
-                        // 4-line quiet zone below it, and two consecutive all-blank
-                        // lines can never occur *inside* the code itself (the timing
-                        // pattern guarantees a dark module on alternating rows), so
-                        // emitting after 2 blank lines is both safe and reliable.
-                        if qr_data.contains('█') || qr_data.contains('�') {
-                            empty_line_count += 1;
-                            if empty_line_count >= 2 && !qr_emitted {
-                                app.emit("auth://qr_ready", &qr_data).ok();
-                                qr_emitted = true;
-                            }
-                        }
-                    } else {
-                        empty_line_count = 0;
-                    }
-                } else {
-                    // A normal text line ended the QR block before the trailing
-                    // quiet zone was seen. Flush whatever we captured so the modal
-                    // still opens (covers terminals that trim trailing whitespace).
-                    capturing_qr = false;
-                    if !qr_emitted && (qr_data.contains('█') || qr_data.contains('�')) {
-                        app.emit("auth://qr_ready", &qr_data).ok();
-                        qr_emitted = true;
-                    }
-                }
-            } else if lower.contains("with this qr code:") || lower.contains("qr code has changed:")
-            {
-                // A fresh QR code is about to be drawn. Reset state so the new
-                // code is captured and re-emitted (Steam rotates the challenge URL
-                // periodically while the modal is open).
-                capturing_qr = true;
-                qr_data.clear();
-                empty_line_count = 0;
-                qr_emitted = false;
-            }
-        }
-
-        // If the process ended while we still held a captured-but-unshown QR,
-        // emit it so the modal can render it rather than spin.
-        if !qr_emitted && qr_data.contains('\u{2588}') {
-            app.emit("auth://qr_ready", &qr_data).ok();
-            qr_emitted = true;
-        }
-
-        // Cleanup. `we_killed_child` is true only when the child was still owned
-        // here (i.e. it exited on its own). If the user pressed Cancel,
-        // accounts_cancel_qr already took & killed the handle, so take() yields
-        // None and we stay silent (no spurious error toast).
-        let we_killed_child = {
-            let mut killed = false;
-            if let Ok(mut child_guard) = child_handle.try_lock() {
-                if let Some(mut c) = child_guard.take() {
-                    let _ = c.kill().await;
-                    killed = true;
-                }
-            }
-            killed
-        };
-
-        // Process exited before producing any QR -> report failure so the modal
-        // closes with an error instead of showing "Generating..." forever.
-        if !qr_emitted && we_killed_child {
-            app.emit(
-                "auth://qr_failed",
-                "DepotDownloader exited before producing a QR code",
-            )
-            .ok();
-        }
-        app.emit("auth://done", "qr").ok();
-    });
-
-    Ok(())
-}
-
-#[command]
-pub async fn accounts_cancel_qr() -> Result<(), String> {
-    let child_handle_opt = {
-        let qr_handle = QR_LOGIN_HANDLE.lock();
-        qr_handle.clone()
-    };
-
-    if let Ok(mut child_guard) = child_handle_opt.try_lock() {
-        if let Some(mut c) = child_guard.take() {
-            let _ = c.kill().await;
-        }
-    }
-    Ok(())
-}
-
-/// Kill any in-flight custom-account login / verification processes.
-///
-/// Called when the download login modal closes so DepotDownloader does not keep
-/// running (and spamming the console) in the background after the window is
-/// gone. Also stops a pending QR login for good measure.
-#[command]
 pub async fn accounts_cancel_auth() -> Result<(), String> {
     // Drain all credential-verification handles out of the map first so we do
     // not hold the synchronous mutex across the await points below.
@@ -405,17 +110,6 @@ pub async fn accounts_cancel_auth() -> Result<(), String> {
             if let Some(mut c) = guard.take() {
                 let _ = c.kill().await;
             }
-        }
-    }
-
-    // Also stop a running QR login, if any.
-    let qr_handle = {
-        let guard = QR_LOGIN_HANDLE.lock();
-        guard.clone()
-    };
-    if let Ok(mut guard) = qr_handle.try_lock() {
-        if let Some(mut c) = guard.take() {
-            let _ = c.kill().await;
         }
     }
     Ok(())

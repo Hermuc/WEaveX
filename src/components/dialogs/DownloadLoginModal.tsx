@@ -11,16 +11,19 @@ import { useAppStore } from "@/stores/app";
 /**
  * Login modal for *download* accounts.
  *
- * Visually this mirrors {@link LoginModal} (Steam web session), but the logic is
- * completely different: it drives the DepotDownloader-based custom account flow
- * (`accounts_verify_custom` / `accounts_set_custom`) and relies on the
- * `auth://*` events instead of the `steam_login_*` web session commands. The
- * Steam Guard / 2FA step is handled by the global Download2FAModal. The two
- * modals are intentionally only similar in appearance.
+ * This is the app's single "add Steam account" flow, and the only place a
+ * credential is stored.
  *
- * QR login lives outside this modal (the dedicated QR button + DownloadQRModal)
- * because the QR and credential flows spawn separate DepotDownloader processes
- * that must not run at the same time.
+ * Two verification steps run in sequence:
+ *   1. `accounts_verify_custom` — DepotDownloader checks the password and
+ *      reports back over the `auth://*` events (the Steam Guard / 2FA step is
+ *      handled by the global Download2FAModal).
+ *   2. `accounts_set_custom` — once verification succeeds the credential is
+ *      encrypted to disk *and* used to establish the Workshop parser session,
+ *      so one account powers both browsing and downloading.
+ *
+ * QR login is intentionally not offered: a QR scan can establish a web session
+ * but yields no reusable password, so it cannot be stored as a download account.
  */
 export default function DownloadLoginModal({
   open,

@@ -306,6 +306,7 @@ export default {
       "Enter the Steam credentials.",
     custom_badge: "custom",
     auto_account: "Not set",
+    add_account_first: "Add your Steam account below first, then you can re-login.",
     not_signed_in: "Not signed in",
     open_parser: "Open Parser",
     relogin: "Relogin",
@@ -315,8 +316,8 @@ export default {
     steam_window_help:
       "If Steam asks for mobile confirmation, an email code or device authorisation, complete it in that window. This dialog closes automatically once you are signed in.",
     show_steam_window: "Show the Steam window again",
-    login_account_hint: "Enter your own Steam account. If you leave the fields empty and click 'Relogin to system account', your custom account (added under Accounts) is used first.",
-    login_description: "Enter your Steam account credentials to log in to the parser.",
+    login_account_hint: "You can leave both fields empty and press Relogin to use the account you added under Accounts.",
+    login_description: "Re-establish the Steam web session used to browse the Workshop. Enter your account, or use the account you already added under Accounts.",
     login_2fa_description: "Enter your Steam Guard code or confirm the login on your mobile device.",
     continue_offline: "Continue anonymously (dont ask again)",
     auto_open_login: "Automatically open login form on failure",

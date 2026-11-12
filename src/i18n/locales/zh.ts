@@ -306,6 +306,7 @@ export default {
       "输入 Steam 登录凭据。",
     custom_badge: "自定义",
     auto_account: "未设置",
+    add_account_first: "请先在下方添加你的 Steam 账号，然后再重新登录。",
     not_signed_in: "未登录",
     open_parser: "打开解析器",
     relogin: "重新登录",
@@ -315,8 +316,8 @@ export default {
     steam_window_help:
       "如果 Steam 要求手机确认、邮箱验证码或设备授权，请直接在那个窗口里操作。登录成功后本窗口会自动关闭。",
     show_steam_window: "重新显示 Steam 窗口",
-    login_account_hint: "填写你自己的 Steam 账号。若留空直接点「重新登录系统账户」，会优先使用你在「账户」里添加的自定义账号。",
-    login_description: "输入你的 Steam 账户凭据以登录解析器。",
+    login_account_hint: "两个输入框都留空、直接点「重新登录」，就会使用你在「账户」里添加的账号。",
+    login_description: "重新建立用于浏览创意工坊的 Steam 网页会话。可输入你的账号，或直接使用你已在「账户」中添加的账号。",
     login_2fa_description: "输入 Steam Guard 验证码，或在移动设备上确认登录。",
     continue_offline: "匿名继续（不再询问）",
     auto_open_login: "失败时自动打开登录表单",

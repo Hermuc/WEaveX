@@ -101,8 +101,6 @@ pub fn run() {
             commands::accounts::accounts_reset_custom,
             commands::accounts::accounts_verify_custom,
             commands::accounts::accounts_submit_2fa,
-            commands::accounts::accounts_login_qr,
-            commands::accounts::accounts_cancel_qr,
             commands::accounts::accounts_cancel_auth,
             commands::updater::updater_check,
             commands::updater::updater_skip_version,

@@ -30,9 +30,6 @@ export const EVENTS = {
   AUTH_SUCCESS: "auth://success",
   AUTH_FAILED: "auth://failed",
   AUTH_DONE: "auth://done",
-  AUTH_QR_READY: "auth://qr_ready",
-  AUTH_QR_SUCCESS: "auth://qr_success",
-  AUTH_QR_FAILED: "auth://qr_failed",
 
   // --- Steam webview session ---
   STEAM_LOGIN_SUCCESS: "steam-login-success",
