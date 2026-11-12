@@ -303,6 +303,14 @@ export default {
     account_section: "Steam account",
     account_section_description:
       "One account signs in for browsing and is used for downloads.",
+    sign_in: "Sign in with Steam",
+    sign_out: "Sign out",
+    confirm_sign_out:
+      "Sign out of Steam? Browsing age-gated items and downloads will stop until you sign in again.",
+    signed_in_status: "Signed in",
+    saved_not_signed_in: "Saved account — not signed in",
+    no_account_hint: "Sign in to browse age-gated items and download",
+    forget_account: "Forget",
     no_account: "No account added",
     steam_session_description:
       "Log in to Steam for the parser to view 18+ content.",

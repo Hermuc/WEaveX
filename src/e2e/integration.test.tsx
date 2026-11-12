@@ -285,7 +285,7 @@ describe("Cross-Feature Combination E2E Tests (Tier 3)", () => {
     const accountTab = await screen.findByRole("tab", { name: /account/i });
     await userEvent.click(accountTab);
 
-    const addCustomBtn = await screen.findByRole("button", { name: /add custom account/i });
+    const addCustomBtn = await screen.findByRole("button", { name: /sign in with steam/i });
     await userEvent.click(addCustomBtn);
 
     const input = screen.getByLabelText(/username/i);

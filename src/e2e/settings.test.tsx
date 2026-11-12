@@ -170,7 +170,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     const accountTab = await screen.findByRole("tab", { name: /account/i });
     await userEvent.click(accountTab);
 
-    const addCustomBtn = await screen.findByRole("button", { name: /add custom account/i });
+    const addCustomBtn = await screen.findByRole("button", { name: /sign in with steam/i });
     await userEvent.click(addCustomBtn);
 
     const usernameInput = await screen.findByLabelText(/username/i);
@@ -247,7 +247,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     const accountTab = await screen.findByRole("tab", { name: /account/i });
     await userEvent.click(accountTab);
 
-    const addCustomBtn = await screen.findByRole("button", { name: /add custom account/i });
+    const addCustomBtn = await screen.findByRole("button", { name: /sign in with steam/i });
     await userEvent.click(addCustomBtn);
 
     const usernameInput = await screen.findByLabelText(/username/i);
@@ -268,7 +268,7 @@ describe("Settings Dialog E2E Tests (F3)", () => {
     const accountTab = await screen.findByRole("tab", { name: /account/i });
     await userEvent.click(accountTab);
 
-    const addCustomBtn = await screen.findByRole("button", { name: /add custom account/i });
+    const addCustomBtn = await screen.findByRole("button", { name: /sign in with steam/i });
     await userEvent.click(addCustomBtn);
 
     const addBtn = await screen.findByRole("button", { name: /^add$/i });

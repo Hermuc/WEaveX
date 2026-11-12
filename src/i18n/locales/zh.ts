@@ -302,6 +302,13 @@ export default {
     steam_session: "Steam 网页会话",
     account_section: "Steam 账号",
     account_section_description: "同一个账号用于浏览登录与下载。",
+    sign_in: "使用 Steam 登录",
+    sign_out: "退出登录",
+    confirm_sign_out: "确定退出 Steam 登录？退出后将无法浏览 18+ 内容，也无法下载，直到重新登录。",
+    signed_in_status: "已登录",
+    saved_not_signed_in: "已保存账号 — 未登录",
+    no_account_hint: "登录后可浏览 18+ 内容并下载",
+    forget_account: "忘记账号",
     no_account: "未添加账号",
     steam_session_description:
       "登录 Steam，让解析器可以查看 18+ 内容。",
