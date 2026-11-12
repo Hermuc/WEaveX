@@ -40,13 +40,21 @@ pub fn we_set_directory(state: AppStateHandle<'_>, path: String) -> Result<(), S
 #[command]
 pub async fn we_list_installed(
     state: AppStateHandle<'_>,
+    force: Option<bool>,
 ) -> Result<Vec<InstalledWallpaper>, String> {
     // Clone the Arc so the worker owns it; the RwLock guard must not cross an
     // await point.
     let client = state.we_client.clone();
-    tauri::async_runtime::spawn_blocking(move || client.read().installed_wallpapers())
-        .await
-        .map_err(|e| e.to_string())
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let guard = client.read();
+        if force {
+            guard.invalidate_installed();
+        }
+        guard.installed_wallpapers()
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -194,7 +202,10 @@ pub fn we_delete_wallpaper(state: AppStateHandle<'_>, pubfileid: String) -> Resu
     }
 
     state.metadata.read().remove_item(&pubfileid);
-    remove_folder(&folder).map_err(map_err)
+    let result = remove_folder(&folder).map_err(map_err);
+    // The installed list is cached; a deletion changes it.
+    state.we_client.read().invalidate_installed();
+    result
 }
 
 #[command]

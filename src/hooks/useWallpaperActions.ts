@@ -62,7 +62,9 @@ export function useWallpaperActions() {
     // Fetch the list and its metadata together: they are independent, and doing
     // them in sequence doubled the wait on a cold cache.
     const [list, meta] = await Promise.all([
-      tryInvoke<InstalledWallpaper[]>("we_list_installed", undefined, []),
+      tryInvoke<InstalledWallpaper[]>("we_list_installed", {
+        force: opts?.force ?? false,
+      }, []),
       tryInvoke<Record<string, InstalledMetadata>>("metadata_get_all", undefined, {}),
     ]);
     const next = list ?? [];

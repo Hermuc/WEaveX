@@ -3,9 +3,18 @@ use tauri::command;
 
 use crate::commands::AppStateHandle;
 
+/// Return every stored metadata entry.
+///
+/// Runs on a blocking worker: Tauri executes synchronous commands on the main
+/// thread, and the UI thread must never be blocked — a blocked main thread
+/// stops the window from repainting, which is what produced the translucent
+/// rectangles during view switches (the compositor had nothing to show).
 #[command]
-pub fn metadata_get_all(state: AppStateHandle<'_>) -> Value {
-    state.metadata.read().get_all()
+pub async fn metadata_get_all(state: AppStateHandle<'_>) -> Result<Value, String> {
+    let store = state.metadata.clone();
+    tauri::async_runtime::spawn_blocking(move || store.read().get_all())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[command]

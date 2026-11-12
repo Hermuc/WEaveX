@@ -38,15 +38,34 @@ pub const SOURCE_WORKSHOP: &str = "workshop";
 
 pub struct WallpaperEngineClient {
     pub directory: Option<PathBuf>,
+    /// Cached result of `installed_wallpapers()`.
+    ///
+    /// The scan walks three directories and parses a project.json per entry.
+    /// Doing that on every view switch was measurable (and, combined with the
+    /// lock contention it causes, made the window stutter). The result only
+    /// changes when a wallpaper is added, deleted or re-applied, and every such
+    /// path calls `invalidate_installed()` explicitly.
+    installed_cache: std::sync::Mutex<Option<Vec<InstalledWallpaper>>>,
 }
 
 impl WallpaperEngineClient {
     pub fn new(directory: Option<PathBuf>) -> Self {
-        Self { directory }
+        Self {
+            directory,
+            installed_cache: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Drop the cached installed list so the next read rescans the disk.
+    pub fn invalidate_installed(&self) {
+        if let Ok(mut guard) = self.installed_cache.lock() {
+            *guard = None;
+        }
     }
 
     pub fn set_directory(&mut self, directory: Option<PathBuf>) {
         self.directory = directory;
+        self.invalidate_installed();
     }
 
     pub fn config_path(&self) -> Option<PathBuf> {
@@ -161,6 +180,20 @@ impl WallpaperEngineClient {
     /// `source` so the UI can tell them apart (deleting a workshop item is
     /// pointless — Steam re-downloads it).
     pub fn installed_wallpapers(&self) -> Vec<InstalledWallpaper> {
+        if let Ok(guard) = self.installed_cache.lock() {
+            if let Some(hit) = guard.as_ref() {
+                return hit.clone();
+            }
+        }
+        let scanned = self.scan_installed_wallpapers();
+        if let Ok(mut guard) = self.installed_cache.lock() {
+            *guard = Some(scanned.clone());
+        }
+        scanned
+    }
+
+    /// The uncached disk walk.
+    fn scan_installed_wallpapers(&self) -> Vec<InstalledWallpaper> {
         let mut out: Vec<InstalledWallpaper> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 

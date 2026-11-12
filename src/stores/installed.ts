@@ -42,9 +42,13 @@ export const useInstalledStore = create<InstalledState>((set, get) => ({
       set({ ready: true });
       return;
     }
+    // `force` bypasses the backend's scan cache. This method is called after
+    // a download, a deletion or a manual refresh — the only moments the list
+    // can actually change — so paying for a real scan here is correct. View
+    // switches call `we_list_installed` without it and get the cached result.
     const items = await tryInvoke<InstalledWallpaper[]>(
       "we_list_installed",
-      undefined,
+      { force: true },
       [],
     );
     get().setAll(items ?? []);

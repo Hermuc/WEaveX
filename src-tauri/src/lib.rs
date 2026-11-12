@@ -72,6 +72,7 @@ pub fn run() {
             // Don't start .NET Runtime check here - let frontend trigger it
             // arc_state.init_dotnet_runtime();
             app.manage(arc_state);
+
             // Streams live outside AppState so they can be torn down
             // independently and survive account refreshes.
             app.manage(Arc::new(commands::video_stream::StreamRegistry::new()));

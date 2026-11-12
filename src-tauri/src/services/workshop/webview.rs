@@ -60,6 +60,16 @@ impl SteamWebview {
         self.jar.clone()
     }
 
+    /// True when the hidden Steam window already exists.
+    ///
+    /// Callers use this to avoid *creating* the window just to ask a
+    /// question. Creating it is expensive and, worse, makes Windows paint
+    /// the window's non-client frame for a moment — visible as a
+    /// translucent rounded rectangle flashing over the app on startup.
+    fn window_exists(&self) -> bool {
+        self.app.get_webview_window(LABEL).is_some()
+    }
+
     /// Create (if missing) and return the hidden Steam webview. Idempotent.
     /// Returns `true` when a new window was created on this call, `false`
     /// when it already existed — callers use this to know whether they
@@ -68,12 +78,20 @@ impl SteamWebview {
         if self.app.get_webview_window(LABEL).is_some() {
             return Ok(false);
         }
+        log::warn!("[steam-webview] CREATING hidden window (this should happen once)");
         let url = WebviewUrl::External(STEAM_LOGIN_URL.parse().expect("valid url"));
         WebviewWindowBuilder::new(&self.app, LABEL, url)
             .title("Steam")
             .data_directory(self.data_dir.clone())
             .visible(false)
-            .decorations(true)
+            // No decorations and no shadow: this window is meant to be invisible
+            // until the user opens the login dialog. With decorations enabled
+            // Windows draws a frame + drop shadow for it, and that frame can
+            // become visible during compositing (DWM may paint the non-client
+            // area even while the client area is hidden), which looks like a
+            // translucent rectangle flashing over the main window.
+            .decorations(false)
+            .shadow(false)
             .skip_taskbar(true)
             .inner_size(1000.0, 720.0)
             .resizable(true)
@@ -129,7 +147,10 @@ impl SteamWebview {
     /// action (see `force` in `auto_login`).
     pub async fn prepare_login(&self) -> Result<(), tauri::Error> {
         let _g = self.lock.lock().await;
-        self.ensure_window()?;
+        // Do not create the window just because the login dialog opened.
+        if !self.window_exists() {
+            return Ok(());
+        }
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Ok(());
         };
@@ -262,7 +283,10 @@ impl SteamWebview {
     /// additional file storage is needed.
     pub async fn sync_cookies(&self) -> Result<usize, String> {
         let _g = self.lock.lock().await;
-        self.ensure_window().map_err(|e| e.to_string())?;
+        // Read cookies only if the window already exists.
+        if !self.window_exists() {
+            return Ok(0);
+        }
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Ok(0);
         };
@@ -309,10 +333,12 @@ impl SteamWebview {
     /// the user pressed "Open Parser" and incidentally created the window.
     pub async fn is_logged_in(&self) -> bool {
         let _g = self.lock.lock().await;
-        let created = match self.ensure_window() {
-            Ok(created) => created,
-            Err(_) => return false,
-        };
+        // Never create the window to answer this question.
+        if !self.window_exists() {
+            return false;
+        }
+        // The window exists (checked above), so nothing was created on this call.
+        let created = false;
         // When we just created the window, WebView2 needs a brief moment to
         // restore the persisted cookie jar from disk before they're readable.
         // Poll a few times so a freshly-created window doesn't report a stale
@@ -421,7 +447,11 @@ impl SteamWebview {
         force: bool,
     ) -> Result<bool, String> {
         let _g = self.lock.lock().await;
-        self.ensure_window().map_err(|e| e.to_string())?;
+        // Do not create the window to probe the session: a session implies
+        // the window already exists, so a missing window means "not logged in".
+        if !self.window_exists() {
+            return Ok(false);
+        }
 
         // Early return if we're already logged in from a previous run,
         // unless the caller explicitly wants to force a re-login.

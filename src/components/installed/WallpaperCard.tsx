@@ -79,10 +79,14 @@ export default function WallpaperCard({
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       style={{
-        animationDelay: `${index * 0.05}s`,
+        // Stagger the entry animation so a freshly loaded grid fades in as a
+        // wave instead of all at once. This was previously a no-op: the delay
+        // was set but no animation was ever applied.
+        animationDelay: `${Math.min(index, 24) * 0.04}s`,
       }}
       className={cn(
         "card card-hover group relative flex cursor-pointer flex-col overflow-hidden",
+        "animate-fade-in",
         enableLayoutAnimations
           ? "transition-all duration-300 ease-out"
           : "transition-[border-color,box-shadow] duration-200",

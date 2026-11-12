@@ -130,7 +130,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [ready, sessionPhase, showLoginPromptOnFail, setLoginModalOpen]);
 
-  const setPage = useFiltersStore((s) => s.setPage);
+const setPage = useFiltersStore((s) => s.setPage);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
   const changeView = (key: NavKey) => {
@@ -193,7 +193,7 @@ export default function App() {
               onOpenInfo={() => setInfoOpen(true)}
               onOpenTasks={() => setTasksOpen(true)}
             />
-            <main className="relative flex-1 overflow-hidden">
+            <main className="relative flex-1 overflow-hidden bg-background">
               <AnimatePresence mode="wait">
                 {ready && activeKey === "workshop" && (
                   <ViewWrap key="workshop">
@@ -248,6 +248,11 @@ export default function App() {
   );
 }
 
+/// Wraps a view during navigation, animating it in and out.
+///
+/// `bg-background` is deliberate: the wrapper fills the content area, and
+/// without its own background the window behind it can show through while
+/// the view is mid-transition.
 function ViewWrap({ children }: { children: React.ReactNode }) {
   return (
     <motion.div
@@ -255,7 +260,7 @@ function ViewWrap({ children }: { children: React.ReactNode }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.18 }}
-      className="absolute inset-0 overflow-hidden"
+      className="absolute inset-0 overflow-hidden bg-background"
     >
       {children}
     </motion.div>
