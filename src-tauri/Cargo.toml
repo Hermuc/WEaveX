@@ -40,6 +40,8 @@ prost = "0.14"
 # Local HTTP range server that streams video chunks on demand to an external
 # player (mpv). Tiny, tokio-native, no TLS needed (loopback only).
 axum = "0.8"
+# join_all for concurrent CDN token requests.
+futures-util = "0.3"
 scraper = "0.27.0"
 ego-tree = "0.11.0"
 url = "2.5.8"

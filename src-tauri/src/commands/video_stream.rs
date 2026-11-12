@@ -76,13 +76,27 @@ pub async fn video_stream_start(
         }
     }
 
-    let client = video_stream::login(&creds.username, &creds.password)
+    // Reuse a cached session when possible: a full CM handshake costs 10-40s,
+    // and the button can be clicked several times in a row.
+    let client = video_stream::shared_login(&creds.username, &creds.password)
         .await
         .map_err(|e| e.to_string())?;
 
-    let video = video_stream::resolve_video(&client, item_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    let video = match video_stream::resolve_video(&client, item_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            // The cached session may have gone stale (CM drops idle sockets).
+            // Forget it and retry once with a fresh login.
+            log::warn!("[video-stream] resolve failed on cached session ({e}); retrying fresh");
+            video_stream::forget_session();
+            let fresh = video_stream::login(&creds.username, &creds.password)
+                .await
+                .map_err(|e| e.to_string())?;
+            video_stream::resolve_video(&fresh, item_id)
+                .await
+                .map_err(|e| e.to_string())?
+        }
+    };
 
     let info = video.info.clone();
     let server = video_server::serve(video)

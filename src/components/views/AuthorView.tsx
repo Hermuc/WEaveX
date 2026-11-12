@@ -130,7 +130,7 @@ export default function AuthorView() {
     setSelected(item);
   };
 
-  const handleWatch = useWatchWhileDownloading();
+  const { watch: handleWatch, state: watchState } = useWatchWhileDownloading();
 
   const handleDownload = async (item: WorkshopItem) => {
     if (item.is_collection) {
@@ -255,6 +255,7 @@ export default function AuthorView() {
         onDownload={handleDownload}
 
         onWatch={handleWatch}
+        watchState={watchState}
       />
     </div>
   );

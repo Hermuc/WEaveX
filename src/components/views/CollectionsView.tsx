@@ -230,7 +230,7 @@ export default function CollectionsView() {
     if (c) setOpened(c);
   };
 
-  const handleWatch = useWatchWhileDownloading();
+  const { watch: handleWatch, state: watchState } = useWatchWhileDownloading();
 
   const handleDownload = async (item: WorkshopItem) => {
     if (item.is_collection) {
@@ -295,6 +295,7 @@ export default function CollectionsView() {
           onDownload={handleDownload}
 
           onWatch={handleWatch}
+        watchState={watchState}
         />
         <CollectionInfoDialog
           open={showInfo}
@@ -370,6 +371,7 @@ export default function CollectionsView() {
         onDownload={handleDownload}
 
         onWatch={handleWatch}
+        watchState={watchState}
       />
     </div>
   );

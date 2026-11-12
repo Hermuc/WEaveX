@@ -1,46 +1,64 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "@/i18n/hooks";
 import { pushToast } from "@/stores/toasts";
 import { startVideoStream } from "@/lib/videoStream";
 import type { WorkshopItem } from "@/types/workshop";
+
+export interface WatchState {
+  /** Item currently being resolved/launched, or null when idle. */
+  pendingId: string | null;
+  /** Last error message for inline display, cleared on the next attempt. */
+  error: string | null;
+}
 
 /**
  * Shared "watch while downloading" handler.
  *
  * Video wallpapers are handed to an external player over a local HTTP range URL,
  * so playback starts immediately and seeking does not wait for the download.
- * The Rust side owns the stream lifecycle; this hook only reports outcomes.
  *
- * Kept as a hook so the three workshop views (browse / author / collections)
- * share one implementation instead of three copies of the same toast logic.
+ * Feedback is returned as state rather than toasts: the details panel sets
+ * `detailsOpen`, and the toast store deliberately suppresses toasts while a
+ * panel is open — so a toast-based spinner would be invisible exactly where
+ * this button lives. The caller renders a spinner from `pendingId` instead.
  */
-export function useWatchWhileDownloading(): (item: WorkshopItem) => Promise<void> {
+export function useWatchWhileDownloading(): {
+  watch: (item: WorkshopItem) => Promise<void>;
+  state: WatchState;
+} {
   const { t } = useTranslation();
+  const [state, setState] = useState<WatchState>({ pendingId: null, error: null });
 
-  return useCallback(
+  const watch = useCallback(
     async (item: WorkshopItem) => {
       // Collections have no single video to stream.
       if (item.is_collection) return;
 
-      pushToast(t("messages.streaming_starting"), "info");
-
+      setState({ pendingId: item.pubfileid, error: null });
       try {
-        const res = await startVideoStream(item.pubfileid);
+        await startVideoStream(item.pubfileid);
+        setState({ pendingId: null, error: null });
+        // Success toast also works when the panel closes (detailsOpen false by
+        // then), so the user still gets confirmation.
         pushToast(
-          t("messages.streaming_started", { player: res.player }),
+          t("messages.streaming_started", { player: "mpv" }),
           "success",
         );
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
+        let msg: string;
         if (raw.includes("NO_PLAYER")) {
-          pushToast(t("messages.streaming_no_player"), "error");
+          msg = t("messages.streaming_no_player");
         } else if (raw.includes("NO_ACCOUNT")) {
-          pushToast(t("messages.streaming_no_account"), "error");
+          msg = t("messages.streaming_no_account");
         } else {
-          pushToast(t("messages.streaming_failed", { error: raw }), "error");
+          msg = t("messages.streaming_failed", { error: raw });
         }
+        setState({ pendingId: null, error: msg });
       }
     },
     [t],
   );
+
+  return { watch, state };
 }

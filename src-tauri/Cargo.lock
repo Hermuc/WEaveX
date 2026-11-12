@@ -6644,6 +6644,7 @@ dependencies = [
  "dirs",
  "ego-tree",
  "env_logger",
+ "futures-util",
  "log",
  "lru",
  "once_cell",

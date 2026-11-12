@@ -37,6 +37,10 @@ interface DetailsActionButtonsProps {
   /// Stream the wallpaper's video to an external player while it downloads.
   /// Only offered for video wallpapers; undefined hides the button.
   onWatch?: (item: WorkshopItem) => void;
+  /// Progress/error state for the watch button, so it can show a spinner.
+  /// Toasts are suppressed while this panel is open, so the button is the only
+  /// place feedback can appear.
+  watchState?: { pendingId: string | null; error: string | null };
   onApply?: (item: InstalledWallpaper) => void;
   onExtract?: (item: InstalledWallpaper) => void;
   onDelete?: (item: InstalledWallpaper) => void;
@@ -64,6 +68,7 @@ export default function DetailsActionButtons({
   onClose,
   onDownload,
   onWatch,
+  watchState,
   onApply,
   onExtract,
   onDelete,
@@ -236,21 +241,40 @@ export default function DetailsActionButtons({
         {/* Video wallpapers can be streamed to an external player while the
             download is still running, so the user does not wait for the whole
             file. Only shown when the caller supplies a handler. */}
-        {kind === "workshop" && onWatch && (
-          <button
-            disabled={meta.is_collection}
-            onClick={() => {
-              if (item && onWatch) {
-                onWatch(item as WorkshopItem);
-                onClose();
-              }
-            }}
-            className="hover-shimmer flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/25 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-          >
-            <Clapperboard className="size-4" />
-            {t("messages.watch_while_downloading") || "Watch while downloading"}
-          </button>
-        )}
+        {kind === "workshop" && onWatch && (() => {
+          const itemId = item ? (item as WorkshopItem).pubfileid : null;
+          const busy = !!watchState?.pendingId && watchState.pendingId === itemId;
+          return (
+            <div className="flex flex-col gap-1.5">
+              <button
+                disabled={meta.is_collection || busy}
+                onClick={() => {
+                  // Do not close the panel: the button itself shows progress,
+                  // and the user needs to see errors without reopening.
+                  if (item && onWatch && !busy) onWatch(item as WorkshopItem);
+                }}
+                className="hover-shimmer flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/25 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+              >
+                {busy ? (
+                  <>
+                    <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    {t("messages.streaming_starting")}
+                  </>
+                ) : (
+                  <>
+                    <Clapperboard className="size-4" />
+                    {t("messages.watch_while_downloading")}
+                  </>
+                )}
+              </button>
+              {watchState?.error && (
+                <p className="text-[11px] leading-relaxed text-red-500">
+                  {watchState.error}
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Moved Open WE to dropdown */}
 

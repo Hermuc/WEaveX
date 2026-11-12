@@ -16,7 +16,6 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use steamroom::cdn::{CdnClient, CdnServerPool};
 use steamroom::client::{LoggedIn, SteamClient};
 use steamroom::depot::manifest::{DepotManifest, ManifestFile};
 use steamroom::depot::{AppId, CellId, ChunkId, DepotId, DepotKey, ManifestId};
@@ -28,7 +27,7 @@ use steamroom_client::login::LoginBuilder;
 pub const WE_APP_ID: u32 = 431960;
 
 /// One contiguous byte range of the video, backed by one chunk.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct ChunkSpan {
     pub offset: u64,
     pub len: u64,
@@ -38,7 +37,7 @@ pub struct ChunkSpan {
 }
 
 /// The byte layout of one video file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct VideoStreamInfo {
     pub item_id: u64,
     pub depot_id: u32,
@@ -210,6 +209,121 @@ fn decompress_manifest(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     }
 }
 
+/// Cached login so repeated clicks do not each pay a full CM handshake.
+///
+/// A `SteamClient` is cheap to reuse but expensive to create (connect, encrypt,
+/// logon). The streaming UI can be clicked several times in a row, and each
+/// miss used to cost 10-40s. The cached client is validated lazily: if a call
+/// on it fails the caller falls back to a fresh login.
+static SESSION: std::sync::Mutex<Option<CachedSession>> = std::sync::Mutex::new(None);
+
+struct CachedSession {
+    username: String,
+    client: SteamClient<LoggedIn>,
+}
+
+/// Get a logged-in client, reusing the cached one when the account matches.
+pub async fn shared_login(
+    username: &str,
+    password: &str,
+) -> anyhow::Result<std::sync::Arc<SteamClient<LoggedIn>>> {
+    // Reuse only for the same account; a different account must re-auth.
+    {
+        let guard = SESSION.lock().unwrap();
+        if let Some(s) = guard.as_ref() {
+            if s.username == username {
+                return Ok(std::sync::Arc::new(s.client.clone()));
+            }
+        }
+    }
+    let client = login(username, password).await?;
+    {
+        let mut guard = SESSION.lock().unwrap();
+        *guard = Some(CachedSession {
+            username: username.to_string(),
+            client: client.clone(),
+        });
+    }
+    Ok(std::sync::Arc::new(client))
+}
+
+/// Drop the cached session (call when the account changes or a call fails).
+pub fn forget_session() {
+    *SESSION.lock().unwrap() = None;
+}
+
+/// On-disk cache of resolved video layouts.
+///
+/// Resolving an item needs a manifest download, which on this network can take
+/// minutes. The layout is immutable for a given (depot, manifest) pair, so it is
+/// persisted and reused across restarts. The manifest id is part of the key, so
+/// a re-uploaded wallpaper (new manifest) misses the cache and re-resolves.
+fn layout_cache_path() -> Option<std::path::PathBuf> {
+    let base = dirs::data_local_dir()?.join("WEave");
+    std::fs::create_dir_all(&base).ok()?;
+    Some(base.join("video_layouts.json"))
+}
+
+fn load_layouts() -> Vec<(u64, std::time::Instant, VideoStreamInfo)> {
+    let Some(p) = layout_cache_path() else {
+        return Vec::new();
+    };
+    let Ok(raw) = std::fs::read_to_string(&p) else {
+        return Vec::new();
+    };
+    // Stored as a plain array of VideoStreamInfo; the TTL clock restarts on load
+    // which is acceptable because entries are also validated by manifest id.
+    let Ok(list) = serde_json::from_str::<Vec<VideoStreamInfo>>(&raw) else {
+        return Vec::new();
+    };
+    list.into_iter()
+        .map(|info| (info.item_id, std::time::Instant::now(), info))
+        .collect()
+}
+
+fn persist_layouts(entries: &[(u64, std::time::Instant, VideoStreamInfo)]) {
+    let Some(p) = layout_cache_path() else { return };
+    let list: Vec<&VideoStreamInfo> = entries.iter().map(|(_, _, i)| i).collect();
+    if let Ok(json) = serde_json::to_string(&list) {
+        let _ = std::fs::write(p, json);
+    }
+}
+
+/// Cached manifest resolution per workshop item.
+///
+/// Resolving an item costs a manifest download (seconds) plus depot-key and
+/// token round-trips. Users commonly reopen the same wallpaper, so the layout is
+/// memoised. It is invalidated by TTL rather than by item id alone: workshop
+/// items can be re-uploaded, and a stale layout would serve wrong bytes.
+static LAYOUTS: std::sync::Mutex<Vec<(u64, std::time::Instant, VideoStreamInfo)>> =
+    std::sync::Mutex::new(Vec::new());
+
+const LAYOUT_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn cached_layout(item_id: u64) -> Option<VideoStreamInfo> {
+    let mut guard = LAYOUTS.lock().unwrap();
+    if guard.is_empty() {
+        *guard = load_layouts();
+    }
+    guard
+        .iter()
+        .find(|(id, at, _)| *id == item_id && at.elapsed() < LAYOUT_TTL)
+        .map(|(_, _, info)| info.clone())
+}
+
+/// True when this item's layout is already known, so the caller can skip the
+/// expensive manifest round-trip and go straight to serving bytes.
+pub fn has_cached_layout(item_id: u64) -> bool {
+    cached_layout(item_id).is_some()
+}
+
+fn store_layout(item_id: u64, info: &VideoStreamInfo) {
+    let mut guard = LAYOUTS.lock().unwrap();
+    guard.retain(|(id, at, _)| *id != item_id && at.elapsed() < LAYOUT_TTL);
+    guard.push((item_id, std::time::Instant::now(), info.clone()));
+    persist_layouts(&guard);
+}
+
 /// Establish a logged-in Steam session for the streaming pipeline.
 ///
 /// Tried in order, most convenient first:
@@ -310,6 +424,8 @@ pub async fn resolve_video(
     client: &SteamClient<LoggedIn>,
     item_id: u64,
 ) -> anyhow::Result<ResolvedVideo> {
+    // (kept taking &SteamClient so callers can pass either an owned or cached one)
+    let _t0 = std::time::Instant::now();
     let req = generated::CPublishedFileGetDetailsRequest {
         publishedfileids: vec![item_id],
         includechildren: Some(true),
@@ -341,70 +457,147 @@ pub async fn resolve_video(
     let depot_id = DepotId(consumer_app);
     let manifest_id = ManifestId(manifest_raw);
 
+    log::info!("[timing] details {:?}", _t0.elapsed());
+    let _t1 = std::time::Instant::now();
     let depot_key = client.get_depot_decryption_key(depot_id, app_id).await?;
+    log::info!("[timing] depot_key {:?}", _t1.elapsed());
     let cdn_servers = client.get_cdn_servers(CellId(0), Some(5)).await?;
     if cdn_servers.is_empty() {
         return Err(anyhow::anyhow!("no CDN servers available"));
     }
-    let cdn_pool = CdnServerPool::new(cdn_servers.clone());
+    log::info!("[timing] cdn_servers {:?}", _t1.elapsed());
 
     // Build one endpoint per advertised server, each with the scheme/port the
     // directory specified and the auth token issued *for that host* (tokens are
     // host-scoped; reusing one across hosts yields HTTP 403).
-    let mut endpoints: Vec<CdnEndpoint> = Vec::with_capacity(cdn_servers.len());
-    for s in &cdn_servers {
-        let scheme = if s.https { "https" } else { "http" };
-        let token = match client.get_cdn_auth_token(app_id, depot_id, &s.host).await {
-            Ok(t) => t.token,
-            Err(e) => {
-                log::warn!("[video-stream] no CDN token for {}: {e}", s.host);
-                None
+    //
+    // Tokens are fetched concurrently: doing it serially cost ~40s per dead host
+    // because each CM round-trip can stall, and the user is watching a spinner.
+    let token_futs = cdn_servers.iter().map(|s| {
+        let host = s.host.clone();
+        async move {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                client.get_cdn_auth_token(app_id, depot_id, &host),
+            )
+            .await
+            {
+                Ok(Ok(t)) => t.token,
+                Ok(Err(e)) => {
+                    log::warn!("[video-stream] no CDN token for {host}: {e}");
+                    None
+                }
+                Err(_) => {
+                    log::warn!("[video-stream] CDN token for {host} timed out");
+                    None
+                }
             }
-        };
+        }
+    });
+    let _t2 = std::time::Instant::now();
+    let tokens = futures_util::future::join_all(token_futs).await;
+    log::info!("[timing] tokens {:?}", _t2.elapsed());
+
+    let mut endpoints: Vec<CdnEndpoint> = Vec::with_capacity(cdn_servers.len());
+    for (s, token) in cdn_servers.iter().zip(tokens) {
+        let scheme = if s.https { "https" } else { "http" };
         endpoints.push(CdnEndpoint {
             base: format!("{scheme}://{}:{}", s.host, s.port),
             token,
         });
     }
-    let cdn = CdnClient::new().map_err(|e| anyhow::anyhow!("cdn client: {e}"))?;
-
     let request_code = client
         .get_manifest_request_code(app_id, depot_id, manifest_id, None, None)
         .await?
         .unwrap_or(0);
 
-    // CDN connectivity is flaky; a manifest fetch can fail transiently even
-    // though a retry seconds later succeeds. Retry a few times before giving up.
-    let mut manifest_data = None;
-    let mut last_err = String::new();
-    for attempt in 0..5u32 {
-        match cdn
-            .download_manifest_pooled(
-                &cdn_pool,
-                depot_id,
-                manifest_id,
-                request_code,
-                endpoints.first().and_then(|e| e.token.as_deref()),
-            )
-            .await
-        {
-            Ok(d) => {
-                manifest_data = Some(d);
-                break;
-            }
-            Err(e) => {
-                last_err = e.to_string();
-                log::warn!(
-                    "[video-stream] manifest attempt {} failed: {e}",
-                    attempt + 1
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(800 * (attempt as u64 + 1)))
-                    .await;
+    // Download the manifest ourselves instead of using
+    // `CdnClient::download_manifest_pooled`: that helper walks the whole server
+    // pool serially with no per-request timeout, which cost minutes when most
+    // hosts in the directory are unreachable from this network. Here every
+    // endpoint is tried concurrently with a hard timeout, and the first
+    // successful body wins.
+    // Generous per-request timeout: on slow networks a manifest body can take
+    // tens of seconds. All endpoints are tried concurrently, so the wall-clock
+    // cost is one timeout, not one per host.
+    let manifest_http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
+
+    let manifest_futs = endpoints.iter().map(|ep| {
+        let url = format!(
+            "{}/depot/{}/manifest/{}/5/{}{}",
+            ep.base,
+            depot_id.0,
+            manifest_id.0,
+            request_code,
+            ep.token.as_deref().unwrap_or("")
+        );
+        let http = manifest_http.clone();
+        let base = ep.base.clone();
+        async move {
+            match http.get(&url).send().await {
+                Ok(r) if r.status().is_success() => match r.bytes().await {
+                    Ok(b) => Some((base, b.to_vec())),
+                    Err(e) => {
+                        log::warn!("[video-stream] manifest body from {base}: {e}");
+                        None
+                    }
+                },
+                Ok(r) => {
+                    log::warn!("[video-stream] manifest from {base} -> HTTP {}", r.status());
+                    None
+                }
+                Err(e) => {
+                    log::warn!("[video-stream] manifest from {base} -> {e}");
+                    None
+                }
             }
         }
-    }
-    let manifest_data = manifest_data
-        .ok_or_else(|| anyhow::anyhow!("manifest download failed after retries: {last_err}"))?;
+    });
+    let results = futures_util::future::join_all(manifest_futs).await;
+    let direct = results.into_iter().flatten().next();
+
+    let manifest_data = match direct {
+        Some((base, data)) => {
+            log::info!("[video-stream] manifest fetched from {base}");
+            data
+        }
+        None => {
+            // Last resort: steamroom's pooled downloader. It walks hosts
+            // serially and has no per-request timeout, so it is slow, but it is
+            // the path that has actually succeeded on constrained networks.
+            log::warn!("[video-stream] direct manifest fetch failed; falling back to pooled");
+            let pool = steamroom::cdn::CdnServerPool::new(cdn_servers.clone());
+            let cdn =
+                steamroom::cdn::CdnClient::new().map_err(|e| anyhow::anyhow!("cdn client: {e}"))?;
+            let mut got = None;
+            for attempt in 0..3u32 {
+                match cdn
+                    .download_manifest_pooled(
+                        &pool,
+                        depot_id,
+                        manifest_id,
+                        request_code,
+                        endpoints.first().and_then(|e| e.token.as_deref()),
+                    )
+                    .await
+                {
+                    Ok(d) => {
+                        got = Some(d.to_vec());
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("[video-stream] pooled attempt {} failed: {e}", attempt + 1);
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+            got.ok_or_else(|| anyhow::anyhow!("manifest download failed on every CDN endpoint"))?
+        }
+    };
+    log::info!("[timing] manifest_download total {:?}", _t0.elapsed());
     let manifest_bytes = decompress_manifest(&manifest_data)?;
     let mut manifest = DepotManifest::parse(&manifest_bytes)
         .map_err(|e| anyhow::anyhow!("manifest parse: {e}"))?;
@@ -443,6 +636,31 @@ pub async fn resolve_video(
     }
     spans.sort_by_key(|s| s.offset);
 
+    // Fast path: a previously resolved layout for this exact manifest id means
+    // the byte map is already known, so the (slow) manifest download can be
+    // skipped entirely. The manifest id is part of the cached entry, so a
+    // re-uploaded wallpaper misses and re-resolves.
+    let serving_http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
+    if let Some(cached) = cached_layout(item_id) {
+        if cached.manifest_id == manifest_id.0 && cached.depot_id == depot_id.0 {
+            log::info!(
+                "[video-stream] layout cache hit for {item_id} ({} spans)",
+                cached.spans.len()
+            );
+            return Ok(ResolvedVideo {
+                info: cached,
+                depot_key: Arc::new(depot_key),
+                depot: depot_id,
+                endpoints: Arc::new(endpoints),
+                http: Arc::new(serving_http),
+                preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            });
+        }
+    }
+
     // native-tls (schannel) is the TLS stack that validates Steam's CDN
     // certificates on this machine; steamroom's rustls client does not.
     let http = reqwest::Client::builder()
@@ -450,16 +668,20 @@ pub async fn resolve_video(
         .build()
         .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
 
-    // Probe the endpoints with the smallest chunk and keep only the ones that
-    // actually serve bytes. Steam hands out host-scoped tokens in different
-    // shapes per host and some hosts are unreachable from a given network, so
-    // assuming the first one works produces intermittent failures at playback
-    // time. Probing once here makes playback deterministic.
+    // Probing every endpoint costs seconds per dead host and the user is
+    // staring at a spinner. Probe with a short timeout, stop at the first host
+    // that serves bytes, and put it first. The remaining endpoints stay in the
+    // list as fallbacks without being probed.
     let probe_span = spans
         .iter()
         .min_by_key(|s| s.len)
         .ok_or_else(|| anyhow::anyhow!("video has no chunks"))?
         .clone();
+    let probe_http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
+
     let mut live: Vec<CdnEndpoint> = Vec::new();
     for ep in &endpoints {
         let url = format!(
@@ -469,10 +691,11 @@ pub async fn resolve_video(
             probe_span.chunk_id,
             ep.token.as_deref().unwrap_or("")
         );
-        match http.get(&url).send().await {
+        match probe_http.get(&url).send().await {
             Ok(r) if r.status().is_success() => {
                 log::info!("[video-stream] CDN endpoint OK: {}", ep.base);
                 live.push(ep.clone());
+                break; // first working host wins; do not burn time on the rest
             }
             Ok(r) => log::warn!(
                 "[video-stream] CDN endpoint {} -> HTTP {}",
@@ -483,21 +706,28 @@ pub async fn resolve_video(
         }
     }
     if live.is_empty() {
-        return Err(anyhow::anyhow!(
-            "no usable CDN endpoint (tried {})",
-            endpoints.len()
-        ));
+        // Nothing answered the probe. Rather than fail outright, keep every
+        // endpoint: the probe itself may have been the unlucky request, and
+        // read_range retries across the whole list anyway.
+        log::warn!("[video-stream] no endpoint answered the probe; trying all at read time");
+        live = endpoints.clone();
     }
 
+    let info = VideoStreamInfo {
+        item_id,
+        depot_id: depot_id.0,
+        manifest_id: manifest_id.0,
+        filename: video.normalized_path(),
+        total_size: video.size,
+        spans,
+    };
+    if has_cached_layout(item_id) {
+        log::info!("[video-stream] layout for {item_id} refreshed (was cached)");
+    }
+    store_layout(item_id, &info);
+
     Ok(ResolvedVideo {
-        info: VideoStreamInfo {
-            item_id,
-            depot_id: depot_id.0,
-            manifest_id: manifest_id.0,
-            filename: video.normalized_path(),
-            total_size: video.size,
-            spans,
-        },
+        info,
         depot_key: Arc::new(depot_key),
         depot: depot_id,
         endpoints: Arc::new(live),

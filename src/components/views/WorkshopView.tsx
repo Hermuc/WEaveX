@@ -144,7 +144,7 @@ export default function WorkshopView() {
     onPageChange: handlePageChange,
   });
 
-  const handleWatch = useWatchWhileDownloading();
+  const { watch: handleWatch, state: watchState } = useWatchWhileDownloading();
 
   const handleDownload = async (item: WorkshopItem) => {
     if (item.is_collection) {
@@ -224,6 +224,7 @@ export default function WorkshopView() {
         onDownload={handleDownload}
 
         onWatch={handleWatch}
+        watchState={watchState}
       />
     </div>
   );

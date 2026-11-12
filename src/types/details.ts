@@ -20,6 +20,9 @@ export interface WorkshopProps extends CommonProps {
   onDownload: (item: WorkshopItem) => void;
   /// Stream the video to an external player while downloading (video wallpapers).
   onWatch?: (item: WorkshopItem) => void;
+  /// Progress/error state for the watch button (toasts are suppressed while a
+  /// details panel is open, so the button must render feedback itself).
+  watchState?: { pendingId: string | null; error: string | null };
 }
 
 export interface InstalledProps extends CommonProps {
