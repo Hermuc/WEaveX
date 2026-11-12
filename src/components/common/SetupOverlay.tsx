@@ -54,13 +54,13 @@ export default function SetupOverlay() {
     };
   }, []);
 
-  if (!showOverlay || queue.length === 0) {
-    return null;
-  }
+  // Do not early-return: unmounting the tree skips the exit animation and the
+  // overlay vanishes in a flash. AnimatePresence below owns the visibility.
+  const visible = showOverlay && queue.length > 0;
 
   return (
     <AnimatePresence>
-      {showOverlay && (
+      {visible && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

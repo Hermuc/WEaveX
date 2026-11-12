@@ -13,9 +13,16 @@ export default function MetadataInitDialog() {
 
   const isOpen = status !== null;
 
-  if (!status) return null;
-
-  const { phase, message, progress, total } = status;
+  // NOTE: do NOT early-return before the AnimatePresence below. Returning null
+  // from the component unmounts the whole tree, so the exit animation never
+  // runs and the overlay disappears abruptly (visible as a flash). Keep the
+  // wrapper mounted and let AnimatePresence drive the exit.
+  const { phase, message, progress, total } = status ?? {
+    phase: "idle" as const,
+    message: "",
+    progress: null,
+    total: null,
+  };
 
   const progressPercent =
     progress !== null && total !== null && total > 0

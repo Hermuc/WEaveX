@@ -16,6 +16,7 @@ import LegalDialog from "@/components/dialogs/LegalDialog";
 import TasksDrawer from "@/components/tasks/TasksDrawer";
 import ToastStack from "@/components/common/ToastStack";
 import SetupOverlay from "@/components/common/SetupOverlay";
+import { AppTooltipProvider } from "@/components/common/Tooltip";
 import MetadataInitDialog from "@/components/common/MetadataInitDialog";
 import LoginModal from "@/components/dialogs/LoginModal";
 import Download2FAModal from "@/components/dialogs/Download2FAModal";
@@ -176,6 +177,10 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion={prefersReducedMotion ? "always" : "never"}>
+      {/* One tooltip provider for the whole app: per-instance providers made
+          every view switch mount several portal containers at once, which
+          flashed empty overlays. */}
+      <AppTooltipProvider>
       <div className="relative flex h-screen w-full flex-col overflow-hidden bg-background text-foreground">
 
         <TitleBar />
@@ -238,6 +243,7 @@ export default function App() {
         <SetupOverlay />
         <MetadataInitDialog />
       </div>
+      </AppTooltipProvider>
     </MotionConfig>
   );
 }
