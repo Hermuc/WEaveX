@@ -14,6 +14,7 @@ import { useNavStore } from "@/stores/nav";
 import { pushToast } from "@/stores/toasts";
 import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
+import { describeDownloadError } from "@/lib/errors";
 import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { WorkshopItem, WorkshopPage } from "@/types/workshop";
@@ -145,7 +146,7 @@ export default function AuthorView() {
     if (res.ok) {
       pushToast(t("messages.download_started"), "success");
     } else {
-      pushToast(`${t("messages.error") || "Error"}: ${res.error}`, "error");
+      pushToast(describeDownloadError(res.error, t), "error");
     }
   };
 

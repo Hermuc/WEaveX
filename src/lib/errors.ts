@@ -279,3 +279,21 @@ export function getUserMessage(error: unknown): string {
 
   return 'An unexpected error occurred';
 }
+
+/**
+ * Turn a `download_start` backend error into a message a user can act on.
+ *
+ * The command returns short machine-readable codes for the cases the UI can
+ * explain better than the raw string — currently `NO_ACCOUNT`, which means the
+ * user has not added a Steam account yet (there is no bundled fallback any
+ * more). Anything else is passed through unchanged.
+ */
+export function describeDownloadError(
+  raw: string | undefined,
+  t: (key: "messages.no_account_for_download" | "messages.error") => string,
+): string {
+  if (raw === "NO_ACCOUNT") {
+    return t("messages.no_account_for_download");
+  }
+  return `${t("messages.error")}: ${raw ?? ""}`;
+}

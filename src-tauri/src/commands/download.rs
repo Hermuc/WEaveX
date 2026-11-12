@@ -15,6 +15,12 @@ pub async fn download_start(
     let Some(we_directory) = state.settings.read().get_directory() else {
         return Err("Wallpaper Engine directory is not configured".into());
     };
+    // There is no bundled account pool any more, so a download with no stored
+    // account would spawn DepotDownloader just to fail with an opaque error.
+    // Fail early with a message that tells the user what to do instead.
+    if state.accounts.builtin_count() == 0 {
+        return Err("NO_ACCOUNT".into());
+    }
     let exe = plugin_paths::depot_downloader()?;
     let index =
         account_index.unwrap_or_else(|| state.settings.read().get_account_number() as usize);

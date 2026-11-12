@@ -146,6 +146,32 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Acceptance test for dropping the bundled pool: a single user account
+    /// must satisfy every consumer of credentials — the parser session, the
+    /// download path, and the retry-loop budget.
+    #[test]
+    fn single_account_covers_every_consumer() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+        mgr.add_user_account("solo", "pw").unwrap();
+
+        // 1) Parser session (steam_auto_login with accountIndex: null).
+        let p = mgr.preferred_parser_credentials();
+        assert_eq!(p.username, "solo");
+        assert!(!p.password.is_empty(), "parser needs a password");
+
+        // 2) Download path (download_start -> credentials(starting_index)).
+        let d = mgr.credentials(0);
+        assert_eq!(d.username, "solo");
+        assert!(!d.password.is_empty(), "download needs a password");
+
+        // 3) Retry-loop budget: one account means exactly one attempt.
+        assert_eq!(mgr.builtin_count(), 1);
+
+        // 4) Out-of-range index clamps to the only account, never to a phantom.
+        assert_eq!(mgr.credentials(99).username, "solo");
+    }
+
     /// A freshly installed app has no accounts at all — no hidden pool.
     #[test]
     fn fresh_install_has_no_accounts() {

@@ -216,6 +216,7 @@ export default {
       "输入创意工坊 ID 和/或 URL\n（以空格或换行分隔）：",
     invalid_we_directory:
       "无效的 Wallpaper Engine 目录。\n请选择正确的文件夹。",
+    no_account_for_download: "还没有 Steam 账号。请先在「设置 → 账户」里添加账号，然后再下载。",
     error: "错误",
     translation_error: "翻译失败",
     signed_in_to_steam: "已登录 Steam",

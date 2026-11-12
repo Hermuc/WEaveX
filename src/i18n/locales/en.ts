@@ -216,6 +216,7 @@ export default {
       "Enter Workshop IDs and/or URLs\n(space or newline separated):",
     invalid_we_directory:
       "Invalid Wallpaper Engine directory.\nPlease select the correct folder.",
+    no_account_for_download: "No Steam account yet. Add one in Settings -> Account before downloading.",
     error: "Error",
     translation_error: "Translation failed",
     signed_in_to_steam: "Signed in to Steam",

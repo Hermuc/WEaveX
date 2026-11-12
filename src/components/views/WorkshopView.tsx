@@ -14,6 +14,7 @@ import { pushToast } from "@/stores/toasts";
 import { useRefreshStore } from "@/stores/refresh";
 import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
+import { describeDownloadError } from "@/lib/errors";
 import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
 import type { WorkshopFilters } from "@/stores/filters";
 import { WorkshopItem, WorkshopPage } from "@/types/workshop";
@@ -159,7 +160,7 @@ export default function WorkshopView() {
     if (res.ok) {
       pushToast(t("messages.download_started"), "success");
     } else {
-      pushToast(`${t("messages.error") || "Error"}: ${res.error}`, "error");
+      pushToast(describeDownloadError(res.error, t), "error");
     }
   };
 

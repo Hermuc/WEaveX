@@ -16,6 +16,7 @@ import {
 import Drawer from "@/components/common/Drawer";
 import PreviewImage from "@/components/common/PreviewImage";
 import * as Progress from "@radix-ui/react-progress";
+import { describeDownloadError } from "@/lib/errors";
 import { invoke, inTauri, tryInvoke, tryInvokeAction } from "@/lib/tauri";
 import { TaskStatus, useTasksStore } from "@/stores/tasks";
 import { useInstalledStore } from "@/stores/installed";
@@ -50,7 +51,7 @@ export default function TasksDrawer({ open, onOpenChange }: Props) {
         accountIndex,
       });
       if (res.ok) pushToast(t("messages.download_started"), "success");
-      else pushToast(`${t("messages.error") || "Error"}: ${res.error}`, "error");
+      else pushToast(describeDownloadError(res.error, t), "error");
     } else if (task.kind === "extract") {
       const res = await tryInvokeAction("pkg_extract", {
         pubfileid: task.pubfileid,
