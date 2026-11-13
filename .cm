@@ -1,0 +1,28 @@
+fix(startup): stop the blank window flash before the first paint
+
+On launch the main window became visible while React was still mounting,
+so for a moment WebView2 showed an empty surface and the user saw a
+translucent rectangle where the UI should be. Measured on this machine:
+`ready` committed at 136ms, the window was revealed at 184ms only after
+this change — before it, reveal raced ahead of the commit entirely.
+
+Two independent fixes:
+
+1. Reveal the window only after the first frame has actually painted.
+   `app_show_main_window` used to fire before `ready` was committed. It now
+   runs from a double requestAnimationFrame after the store update. One
+   frame only guarantees the DOM was updated; two guarantee a paint.
+
+2. Give html/body/#root a solid fallback colour.
+   `background: rgb(var(--bg))` is an invalid declaration until the theme
+   variables exist, and an invalid declaration is dropped outright — the
+   surface was therefore transparent. `background-color: #0f111a` paints
+   immediately; the themed `background` still wins once the variables
+   resolve.
+
+This is not the same root cause as the Installed-page ghost boxes, which
+came from a synchronous disk scan (we_list_installed) blocking the main
+thread. Here nothing blocks: the window simply appeared before its content
+existed.
+
+Gates: tsc 0, eslint 0, vitest 113, cargo test 52, clippy 0 warnings.

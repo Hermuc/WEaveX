@@ -318,6 +318,13 @@
     body,
     #root {
         height: 100%;
+        /* Solid fallback that paints before the theme variables resolve.
+           `background: rgb(var(--bg))` is an invalid declaration until
+           `--bg` exists, and an invalid declaration is dropped entirely —
+           so without this the surface is transparent and the window shows
+           through while the app boots. The later `background` wins once
+           the variables do resolve. */
+        background-color: #0f111a;
         background: rgb(var(--bg));
         color: rgb(var(--fg));
     }

@@ -127,12 +127,29 @@ export function useBootstrap() {
       // settles. Kept fire-and-forget so it never blocks the rest of boot.
       void syncSteamSession();
 
-      // Restore saved window geometry if the feature is on, then show main window once ready.
-      void invoke("app_restore_window_geometry")
-        .then(() => invoke("app_show_main_window"))
-        .catch(() => {
-          void invoke("app_show_main_window").catch(() => undefined);
-        });
+      // Reveal the main window only after the first frame has actually been
+      // painted.
+      //
+      // This used to fire here, before `ready` was committed, so the window
+      // became visible while React was still mounting: a real 403ms gap on
+      // this machine, during which WebView2 had an empty surface and the user
+      // saw a translucent rectangle where the UI should be. Waiting two
+      // animation frames is what guarantees a paint has completed — one frame
+      // only guarantees the DOM was updated.
+      //
+      // `ready` is set above (`useAppStore.setState`), so by the time these
+      // frames run the first real view is on screen; the window therefore
+      // appears already painted instead of blank-then-filled.
+      const revealWindow = () => {
+        void invoke("app_restore_window_geometry")
+          .then(() => invoke("app_show_main_window"))
+          .catch(() => {
+            void invoke("app_show_main_window").catch(() => undefined);
+          });
+      };
+      requestAnimationFrame(() => {
+        requestAnimationFrame(revealWindow);
+      });
 
       // Auto-check for updates on startup if enabled.
       void maybeCheckForUpdates();
