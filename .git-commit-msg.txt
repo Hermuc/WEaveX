@@ -1,0 +1,27 @@
+fix(steam): stop losing the signed-in session on restart
+
+The startup sign-in chain reported login-failed for accounts that were
+perfectly signed in. Root cause was a deadlock plus two logic faults:
+
+- init_cookies runs from setup(), which itself runs on the main thread
+  before the event loop starts. It spawned a worker that called
+  run_on_main_thread() to build the hidden webview and then blocked on a
+  15s recv_timeout. That closure cannot run until setup() returns, so the
+  worker always timed out, sync_cookies() never succeeded, the reqwest jar
+  stayed empty, and every Steam probe looked anonymous. Sleeping briefly
+  before the worker starts lets the main thread reach its event loop.
+
+- current_account() returned None both for Steam redirecting to /login
+  and for a failed HTTP request. Split into a three-state probe so a slow
+  network (measured 3.6s on this machine) is no longer mistaken for a
+  sign-out.
+
+- Startup escalated to steam_auto_login(force: true) when the probe was
+  inconclusive. force runs logout_locked() -> clear_all_browsing_data(),
+  which destroyed a valid steamLoginSecure cookie. Removed the automatic
+  escalation and added a backend guard that refuses a forced re-login
+  while the current session verifies.
+
+Also: sync cookies through add_cookie_str so Domain/HttpOnly survive, and
+let one probe drive both the sidebar badge and the login dialog so the
+status no longer flickers between signed-in and failed.

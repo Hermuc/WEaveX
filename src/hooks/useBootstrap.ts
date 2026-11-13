@@ -325,6 +325,7 @@ async function syncSteamSession() {
   }
   session.setLoggingIn();
 
+
   // Hard ceiling on the whole startup sign-in dance.
   //
   // The steps below can each block for a long time (the legacy form-fill path

@@ -64,6 +64,7 @@ function AccountCard({ onOpenParser }: { onOpenParser: () => void }) {
 
   const refreshSession = useCallback(async () => {
     if (!inTauri) return;
+
     const v = await tryInvoke<boolean>("steam_is_logged_in", undefined, false);
     if (!v) {
       setSessionLoggedIn(null);
