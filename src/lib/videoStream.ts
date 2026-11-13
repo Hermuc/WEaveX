@@ -8,10 +8,6 @@
 
 import { invoke } from "@/lib/tauri";
 
-export interface PlayerInfo {
-  name: string;
-  path: string;
-}
 
 export interface StreamStarted {
   item_id: number;
@@ -34,14 +30,6 @@ export async function prewarmVideoStream(itemId: string | number): Promise<void>
   }
 }
 
-/** Which external player the app found, or null when none is installed. */
-export async function getStreamPlayer(): Promise<PlayerInfo | null> {
-  try {
-    return await invoke<PlayerInfo | null>("video_stream_player");
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Resolve the item, start a range server and launch the player.
@@ -52,13 +40,3 @@ export async function startVideoStream(itemId: string | number): Promise<StreamS
   return await invoke<StreamStarted>("video_stream_start", { itemId: id });
 }
 
-/** Stop the stream for one item. Returns whether one was running. */
-export async function stopVideoStream(itemId: string | number): Promise<boolean> {
-  const id = typeof itemId === "number" ? itemId : Number(itemId);
-  return await invoke<boolean>("video_stream_stop", { itemId: id });
-}
-
-/** Stop every stream (call on shutdown). */
-export async function stopAllVideoStreams(): Promise<number> {
-  return await invoke<number>("video_stream_stop_all");
-}

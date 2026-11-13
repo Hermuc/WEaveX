@@ -6,11 +6,6 @@ use crate::commands::{map_err, AppStateHandle};
 use crate::we_client::{InstalledWallpaper, WallpaperEngineClient};
 
 #[command]
-pub fn we_detect() -> Option<String> {
-    WallpaperEngineClient::detect_installation().map(|p| p.to_string_lossy().to_string())
-}
-
-#[command]
 pub fn we_get_directory(state: AppStateHandle<'_>) -> Option<String> {
     state
         .we_client
@@ -316,18 +311,6 @@ fn delete_wallpaper_blocking(
     result
 }
 
-/// Current wallpaper id for one monitor.
-///
-/// Async: reads and parses config.json from disk. A synchronous command runs
-/// on the main thread in Tauri, which stalls the UI on every call.
-#[command]
-pub async fn we_current_pubfileid(
-    state: AppStateHandle<'_>,
-    monitor: u32,
-) -> Result<Option<String>, String> {
-    Ok(state.we_client.read().current_wallpaper_pubfileid(monitor))
-}
-
 /// Read a wallpaper's project.json.
 ///
 /// Async: plain file I/O. This is called every time the preset-settings panel
@@ -408,11 +391,6 @@ pub fn we_show_icons(state: AppStateHandle<'_>) -> Result<(), String> {
 #[command]
 pub fn we_hide_icons(state: AppStateHandle<'_>) -> Result<(), String> {
     state.we_client.read().hide_icons().map_err(map_err)
-}
-
-#[command]
-pub fn we_set_volume(state: AppStateHandle<'_>, volume: u32) -> Result<(), String> {
-    state.we_client.read().set_volume(volume).map_err(map_err)
 }
 
 #[command]

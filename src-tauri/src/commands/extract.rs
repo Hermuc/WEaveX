@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use tauri::command;
 
 use crate::commands::{map_err, AppStateHandle};
-use crate::download::TaskStatus;
 use crate::plugin_paths;
 
 #[command]
@@ -28,9 +27,4 @@ pub async fn extract_start(
         )
         .await
         .map_err(map_err)
-}
-
-#[command]
-pub fn extract_status_all(state: AppStateHandle<'_>) -> Vec<TaskStatus> {
-    state.extracts.list()
 }

@@ -24,14 +24,6 @@ pub fn app_get_info() -> AppInfo {
     }
 }
 
-/// Return the absolute path of the application's data directory
-/// (`%LOCALAPPDATA%/WEave` on Windows). Used by the About dialog so the
-/// user can copy or open the path.
-#[command]
-pub fn app_get_data_dir(state: AppStateHandle<'_>) -> String {
-    state.app_data_dir.to_string_lossy().to_string()
-}
-
 /// Reveal the application data directory in the OS file manager.
 #[command]
 pub fn app_open_data_dir(state: AppStateHandle<'_>) -> Result<(), String> {

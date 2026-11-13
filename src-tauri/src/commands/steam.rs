@@ -20,22 +20,6 @@ pub async fn steam_parser_show(state: AppStateHandle<'_>) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub async fn steam_login_hide(state: AppStateHandle<'_>) -> Result<(), String> {
-    state.steam_webview.hide().await.map_err(|e| e.to_string())
-}
-
-/// Show the Steam login window **on its current page** so the user can finish
-/// Steam Guard / device authorisation themselves. Does NOT reload the URL.
-#[tauri::command]
-pub async fn steam_login_reveal(state: AppStateHandle<'_>) -> Result<(), String> {
-    state
-        .steam_webview
-        .reveal()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub async fn steam_sync_cookies(state: AppStateHandle<'_>) -> Result<usize, String> {
     let n = state.steam_webview.sync_cookies().await?;
     // Clear page cache so that subsequent requests go through with the new
@@ -144,24 +128,6 @@ pub async fn steam_auto_login(
         state.workshop.clear_caches();
     }
     Ok(ok)
-}
-
-/// Sign in to Steam **with the credentials the user typed**.
-///
-/// This is the manual path and must never be re-routed through a stored
-/// account: an earlier flow dropped the typed credentials and called
-/// `steam_auto_login(accountIndex: None)`, so a manual login could never
-/// succeed as the user.
-#[tauri::command]
-pub async fn steam_login_fill(
-    state: AppStateHandle<'_>,
-    username: &str,
-    password: &str,
-) -> Result<bool, String> {
-    state
-        .steam_webview
-        .login_fill(username.trim(), password)
-        .await
 }
 
 #[tauri::command]
@@ -429,29 +395,6 @@ pub async fn steam_restore_session(
 
 /// Persist the OAuth tokens that came out of a successful sign-in.
 ///
-/// After this, `steam_restore_session` can rebuild the session on future
-/// launches without another sign-in.
-#[tauri::command]
-pub fn steam_save_session(
-    state: AppStateHandle<'_>,
-    username: String,
-    steam_id: String,
-    access_token: String,
-    refresh_token: String,
-) -> Result<(), String> {
-    let session = crate::accounts::StoredSteamSession {
-        steam_id,
-        access_token,
-        refresh_token,
-        saved_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-    };
-    state.accounts.set_session(&username, session)?;
-    log::info!("[steam-session] saved session for {username}");
-    Ok(())
-}
 
 #[tauri::command]
 pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<String>, String> {

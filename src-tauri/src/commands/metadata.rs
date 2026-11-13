@@ -21,29 +21,3 @@ pub async fn metadata_get_all(state: AppStateHandle<'_>) -> Result<Value, String
 pub fn metadata_get(state: AppStateHandle<'_>, pubfileid: String) -> Option<Value> {
     state.metadata.read().get_item(&pubfileid)
 }
-
-/// Async: `set_item` serializes and rewrites all of metadata.json.
-#[command]
-pub async fn metadata_save(
-    state: AppStateHandle<'_>,
-    pubfileid: String,
-    data: Value,
-) -> Result<(), String> {
-    let store = state.metadata.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        store.read().set_item(&pubfileid, data);
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
-/// Async: same full-file rewrite as `metadata_save`.
-#[command]
-pub async fn metadata_remove(state: AppStateHandle<'_>, pubfileid: String) -> Result<(), String> {
-    let store = state.metadata.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        store.read().remove_item(&pubfileid);
-    })
-    .await
-    .map_err(|e| e.to_string())
-}

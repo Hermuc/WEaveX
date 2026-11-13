@@ -193,12 +193,6 @@ impl WallpaperEngineClient {
         None
     }
 
-    pub fn is_installed(&self, pubfileid: &str) -> bool {
-        self.projects_path()
-            .map(|p| p.join(pubfileid).exists())
-            .unwrap_or(false)
-    }
-
     /// Every wallpaper Wallpaper Engine can actually play. That means three
     /// separate directories:
     ///
@@ -358,41 +352,6 @@ impl WallpaperEngineClient {
         out
     }
 
-    pub fn get_config_key(&self, project_path: &Path) -> Option<String> {
-        let is_workshop = project_path
-            .to_string_lossy()
-            .contains("workshop\\content\\431960")
-            || project_path
-                .to_string_lossy()
-                .contains("workshop/content/431960");
-
-        if is_workshop {
-            return project_path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string());
-        }
-
-        // For local projects, the key is the absolute path to the main file with forward slashes
-        let json_path = project_path.join("project.json");
-        if let Ok(raw) = std::fs::read_to_string(&json_path) {
-            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw) {
-                let file = config
-                    .get("file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("scene.pkg");
-                let main_file = project_path.join(file);
-                let mut path_str = main_file.to_string_lossy().replace("\\", "/");
-                // Remove UNC prefix if present
-                if path_str.starts_with("//?/") {
-                    path_str = path_str[4..].to_string();
-                }
-                return Some(path_str);
-            }
-        }
-
-        None
-    }
-
     pub fn apply(
         &self,
         project_path: &Path,
@@ -464,43 +423,6 @@ impl WallpaperEngineClient {
         if let Some(m) = monitor {
             cmd.arg("-monitor").arg(m.to_string());
         }
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            let raw_properties = format!("-properties RAW~({})~END", properties_json);
-            cmd.raw_arg(raw_properties);
-        }
-
-        #[cfg(not(windows))]
-        {
-            cmd.arg("-properties")
-                .arg(format!("RAW~({})~END", properties_json));
-        }
-
-        spawn_detached(cmd)?;
-        Ok(())
-    }
-
-    pub fn save_properties(
-        &self,
-        json_path: &Path,
-        properties: &serde_json::Map<String, serde_json::Value>,
-    ) -> anyhow::Result<()> {
-        let executable = self
-            .executable()
-            .ok_or_else(|| anyhow::anyhow!("Wallpaper Engine executable not found"))?;
-
-        let properties_json = serde_json::to_string(properties)?;
-
-        let mut cmd = Command::new(executable.clone());
-        if let Some(parent) = executable.parent() {
-            cmd.current_dir(parent);
-        }
-        cmd.arg("-control")
-            .arg("openWallpaper")
-            .arg("-file")
-            .arg(json_path);
 
         #[cfg(windows)]
         {
@@ -868,14 +790,6 @@ fn spawn_detached(mut cmd: Command) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn delete_wallpaper_folder(projects_path: &Path, pubfileid: &str) -> anyhow::Result<()> {
-    let target = projects_path.join(pubfileid);
-    if target.exists() {
-        std::fs::remove_dir_all(target)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     /// Regression: Wallpaper Engine nests the config under the Windows
@@ -958,18 +872,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
-
-    #[test]
-    fn test_delete_wallpaper_folder() {
-        let dir = tempdir().unwrap();
-        let pubfileid = "12345";
-        let target = dir.path().join(pubfileid);
-        fs::create_dir(&target).unwrap();
-        assert!(target.exists());
-
-        delete_wallpaper_folder(dir.path(), pubfileid).unwrap();
-        assert!(!target.exists());
-    }
 
     /// Regression: the Installed view merges myprojects, defaultprojects and
     /// the Workshop directory, so delete must find the folder in whichever of

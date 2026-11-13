@@ -1,0 +1,35 @@
+refactor: remove dead code found by a full-repo audit
+
+Four parallel reviewers swept the Rust backend and the TS frontend,
+cross-checking every definition against real call sites rather than
+trusting reference counts. Everything removed below had zero production
+callers; anything merely test-only was reported but left in place.
+
+Rust:
+- we_client: is_installed, get_config_key, save_properties,
+  delete_wallpaper_folder (+ its test) — superseded by the command-layer
+  implementations that are actually wired up.
+- accounts: list_usernames, username_at — list_detailed and credentials
+  cover every caller.
+- webview: unused jar() accessor.
+
+Commands registered in lib.rs but never invoked from the frontend:
+  steam_login_hide, steam_login_reveal, steam_login_fill,
+  steam_save_session, app_get_data_dir, app_minimize,
+  app_get_window_geometry, config_save_window_geometry,
+  accounts_get_current, accounts_set_current, accounts_reset_custom,
+  metadata_save, metadata_remove, we_detect, we_current_pubfileid,
+  we_set_volume, download_status_all, extract_status_all, dotnet_get_root.
+Their Tauri registration and implementations are gone; the functionality
+they duplicated lives elsewhere (events, or the command that is used).
+
+Frontend:
+- lib/videoStream.ts: getStreamPlayer, stopVideoStream,
+  stopAllVideoStreams and the now-unused PlayerInfo type.
+
+Also kept the historical note in webview.rs explaining why the hidden
+window uses decorations(false)/shadow(false): it documents a real DWM
+artefact that used to flash translucent rectangles over the app, and
+removing the reasoning would invite someone to undo the fix.
+
+Gates: cargo fmt/clippy/test 52 passed, tsc 0, eslint 0, vitest 113.

@@ -59,10 +59,6 @@ impl SteamWebview {
         }
     }
 
-    pub fn jar(&self) -> Arc<Jar> {
-        self.jar.clone()
-    }
-
     /// True when the hidden Steam window already exists.
     ///
     /// Callers use this to avoid *creating* the window just to ask a

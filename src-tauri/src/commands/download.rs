@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use tauri::command;
 
 use crate::commands::{map_err, AppStateHandle};
-use crate::download::TaskStatus;
 use crate::plugin_paths;
 
 #[command]
@@ -51,11 +50,6 @@ pub async fn download_cancel(state: AppStateHandle<'_>, pubfileid: String) -> Re
         .unwrap_or_default();
     let result = state.downloads.cancel(&pubfileid, &we_directory).await;
     Ok(result)
-}
-
-#[command]
-pub fn download_status_all(state: AppStateHandle<'_>) -> Vec<TaskStatus> {
-    state.downloads.list()
 }
 
 #[command]

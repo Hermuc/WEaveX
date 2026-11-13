@@ -63,10 +63,6 @@ impl AccountManager {
         self.user_store.list().len()
     }
 
-    pub fn list_usernames(&self) -> Vec<String> {
-        self.merged().into_iter().map(|a| a.username).collect()
-    }
-
     /// Return per-account metadata without leaking passwords to the frontend.
     pub fn list_detailed(&self) -> Vec<AccountCredentials> {
         self.merged()
@@ -89,10 +85,6 @@ impl AccountManager {
             };
         }
         all.get(index).cloned().unwrap_or_else(|| all[0].clone())
-    }
-
-    pub fn username_at(&self, index: usize) -> String {
-        self.credentials(index).username
     }
 
     pub fn add_user_account(&self, username: &str, password: &str) -> Result<(), String> {

@@ -9,7 +9,6 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::accounts::AccountCredentials;
 use crate::commands::AppStateHandle;
 use crate::plugin_paths;
 
@@ -37,19 +36,6 @@ pub fn accounts_list(state: AppStateHandle<'_>) -> Vec<AccountSummary> {
             is_custom: a.is_custom,
         })
         .collect()
-}
-
-#[command]
-pub fn accounts_get_current(state: AppStateHandle<'_>) -> AccountCredentials {
-    let index = state.settings.read().get_account_number() as usize;
-    let mut credentials = state.accounts.credentials(index);
-    credentials.password = String::new();
-    credentials
-}
-
-#[command]
-pub fn accounts_set_current(state: AppStateHandle<'_>, index: u32) {
-    state.settings.read().set_account_number(index);
 }
 
 /// Add a user account and sign in with it.
@@ -82,12 +68,6 @@ pub async fn accounts_set_custom(
 #[command]
 pub fn accounts_remove_custom(state: AppStateHandle<'_>, username: String) -> Result<(), String> {
     state.accounts.remove_user_account(username.trim())
-}
-
-/// Wipe all encrypted user accounts.
-#[command]
-pub fn accounts_reset_custom(state: AppStateHandle<'_>) -> Result<(), String> {
-    state.accounts.clear_user_accounts()
 }
 
 /// List the usernames of user-added accounts (the SettingsDialog shows
