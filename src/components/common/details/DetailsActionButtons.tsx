@@ -287,13 +287,26 @@ export default function DetailsActionButtons({
 
         {/* Moved Open WE to dropdown */}
 
+        {/* Preset settings edit the wallpaper's project.json — they do not
+            require the wallpaper to be on screen right now. Leaving this
+            disabled for inactive wallpapers just looked like a broken button:
+            users with several similar walls could not tell which one was
+            actually applied. Keep it clickable and explain the consequence in
+            the tooltip instead. */}
         {showInstalledActions && installedHandle && (
-          <Tooltip content={(t as any)("tooltips.preset_settings") || "Preset Settings"} side="top">
+          <Tooltip
+            content={
+              isActive
+                ? (t as any)("tooltips.preset_settings") || "Preset Settings"
+                : (t as any)("tooltips.preset_settings_inactive") ||
+                  "Preset Settings (this wallpaper is not on screen — changes are saved to project.json and apply the next time you use it)"
+            }
+            side="top"
+          >
             <button
-              disabled={!isActive}
               onClick={onToggleSettings}
               aria-label="Preset Settings"
-              className="hover-shimmer flex size-9 items-center justify-center rounded-md bg-white/5 text-foreground transition-colors hover:bg-white/10 disabled:opacity-50"
+              className={`hover-shimmer flex size-9 items-center justify-center rounded-md bg-white/5 text-foreground transition-colors hover:bg-white/10 ${isActive ? "" : "opacity-70"}`}
             >
               <Settings2 className="size-4" />
             </button>

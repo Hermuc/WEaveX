@@ -5,6 +5,9 @@ use crate::workshop::SteamAccount;
 
 use tauri::Emitter;
 
+use steamroom_client::login::CredentialsLoginFlow;
+use steamroom_client::login::LoginBuilder;
+
 /// Just opens the parser webview window without starting any login-polling loop.
 /// Safe to call when already logged in — will not fire "steam-login-success".
 #[tauri::command]
@@ -116,9 +119,25 @@ pub async fn steam_auto_login(
         return Err("No Steam credentials available. Add your account in Settings -> Accounts                     (Add custom account) and try again."
             .to_string());
     }
+    // A forced login destroys the current session before retrying. Only the
+    // interactive "sign in again" path passes `force`, so refuse to do it when
+    // a perfectly good session cookie is still present: wiping it would log the
+    // user out for no reason, and that is precisely how a signed-in account used
+    // to disappear on restart.
+    let force = force.unwrap_or(false);
+    let wants_forced_relogin = force && !creds.username.is_empty();
+    if wants_forced_relogin && state.steam_webview.is_logged_in().await {
+        let _ = state.steam_webview.sync_cookies().await;
+        if state.workshop.current_account().await.is_some() {
+            state.workshop.clear_caches();
+            log::info!("[steam-session] refusing forced re-login: session is valid");
+            return Ok(true);
+        }
+    }
+
     let ok = state
         .steam_webview
-        .auto_login(&creds.username, &creds.password, force.unwrap_or(false))
+        .auto_login(&creds.username, &creds.password, force)
         .await?;
     if ok {
         let _ = state.steam_webview.sync_cookies().await;
@@ -258,23 +277,179 @@ pub async fn steam_qr_login_finalize(
         return Err("No webview window".into());
     };
 
-    let script = format!(
-        r#"
-        document.cookie = "steamLoginSecure={}; path=/; domain=steamcommunity.com; secure; samesite=none; max-age=31536000";
-        document.cookie = "sessionid={}; path=/; domain=steamcommunity.com; secure; samesite=none; max-age=31536000";
-        window.location.href = "https://steamcommunity.com/";
-        "#,
-        steam_login_secure, sessionid
-    );
-    w.eval(&script).map_err(|e| e.to_string())?;
+    // Write the cookies through WebView2’s own cookie store, not via
+    // `document.cookie`.
+    //
+    // `steamLoginSecure` is HttpOnly — Steam sets it that way precisely so
+    // scripts cannot read or forge it. A `document.cookie` assignment is
+    // silently ignored for HttpOnly names, so the old code ran without error
+    // and produced no session at all. `WebviewWindow::set_cookie` goes through
+    // the platform cookie manager and can set HttpOnly values.
+    //
+    // Both domains matter: the community site serves the pages we scrape, while
+    // the store domain is what the login flow itself uses.
+    for domain in ["steamcommunity.com", "steampowered.com"] {
+        for (name, value) in [
+            ("steamLoginSecure", steam_login_secure.as_str()),
+            ("sessionid", sessionid.as_str()),
+        ] {
+            let cookie = tauri::webview::Cookie::build((name, value))
+                .domain(domain)
+                .path("/")
+                .secure(true)
+                .http_only(true)
+                .build();
+            w.set_cookie(cookie).map_err(|e| e.to_string())?;
+        }
+    }
+
+    w.eval("window.location.href = 'https://steamcommunity.com/'")
+        .map_err(|e| e.to_string())?;
 
     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
     let _ = state.steam_webview.sync_cookies().await;
     state.workshop.clear_caches();
 
+    // Persist the session so the next launch can skip the whole QR dance.
+    let account = state.accounts.preferred_parser_credentials().username;
+    if !account.is_empty() {
+        let session = crate::accounts::StoredSteamSession {
+            steam_id: steamid.to_string(),
+            access_token: access_token.clone(),
+            refresh_token: _refresh_token.clone(),
+            saved_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        };
+        match state.accounts.set_session(&account, session) {
+            Ok(()) => log::info!("[steam-session] saved QR session for {account}"),
+            Err(e) => log::warn!("[steam-session] could not save QR session: {e}"),
+        }
+    }
+
     let _ = state.app_handle.emit("steam-login-success", ());
 
+    Ok(())
+}
+
+/// Probe the current Steam session, distinguishing failure from signed-out.
+///
+/// Returns `{ state: "signed_in" | "signed_out" | "unknown", account?: {...} }`.
+/// `unknown` means the HTTP call itself failed — the caller must not treat that
+/// as "the user is signed out".
+#[tauri::command]
+pub async fn steam_probe_account(state: AppStateHandle<'_>) -> Result<serde_json::Value, String> {
+    state.steam_webview.ensure_profile_loaded().await;
+    let _ = state.steam_webview.sync_cookies().await;
+
+    let result = state.workshop.probe_account().await;
+    log::info!(
+        "[probe] steam_probe_account -> {}",
+        match &result {
+            crate::workshop::AccountProbe::SignedIn(a) => format!("signed_in({})", a.account_name),
+            crate::workshop::AccountProbe::SignedOut => "signed_out".to_string(),
+            crate::workshop::AccountProbe::Unknown => "unknown".to_string(),
+        }
+    );
+    match result {
+        crate::workshop::AccountProbe::SignedIn(a) => Ok(serde_json::json!({
+            "state": "signed_in",
+            "account": {
+                "persona_name": a.persona_name,
+                "account_name": a.account_name,
+                "steamid": a.steamid,
+                "profile_url": a.profile_url,
+                "avatar_url": a.avatar_url,
+            },
+        })),
+        crate::workshop::AccountProbe::SignedOut => {
+            Ok(serde_json::json!({ "state": "signed_out" }))
+        }
+        crate::workshop::AccountProbe::Unknown => Ok(serde_json::json!({ "state": "unknown" })),
+    }
+}
+
+/// Try to restore a Steam session from the encrypted account store.
+///
+/// This is the fast path at startup: if a session was saved after an earlier
+/// sign-in, its `{steamid, access_token}` pair is enough to rebuild the
+/// `steamLoginSecure` cookie and skip the login page (and Steam Guard).
+///
+/// Returns `true` only when Steam actually accepts the reconstructed session —
+/// we verify by asking Steam who we are, not by trusting the cookie.
+#[tauri::command]
+pub async fn steam_restore_session(
+    state: AppStateHandle<'_>,
+    username: Option<String>,
+) -> Result<bool, String> {
+    // Which account? Default to the first one the user added.
+    let account = match username {
+        Some(u) if !u.trim().is_empty() => u.trim().to_string(),
+        _ => state.accounts.preferred_parser_credentials().username,
+    };
+    if account.is_empty() {
+        return Ok(false);
+    }
+
+    let Some(session) = state.accounts.session_for(&account) else {
+        log::info!("[steam-session] no saved session for {account}");
+        return Ok(false);
+    };
+    if session.steam_id.is_empty() || session.access_token.is_empty() {
+        log::info!("[steam-session] saved session for {account} is incomplete");
+        return Ok(false);
+    }
+
+    // The window has to exist before cookies can be written into it.
+    state.steam_webview.ensure_profile_loaded().await;
+
+    state
+        .steam_webview
+        .install_session_cookies(&session.steam_id, &session.access_token)
+        .map_err(|e| format!("install cookies: {e}"))?;
+
+    // Give the webview a moment, then confirm with Steam itself.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    let _ = state.steam_webview.sync_cookies().await;
+    state.workshop.clear_caches();
+
+    match state.workshop.current_account().await {
+        Some(acc) => {
+            log::info!("[steam-session] restored session for {}", acc.account_name);
+            Ok(true)
+        }
+        None => {
+            log::warn!("[steam-session] saved session for {account} was rejected by Steam");
+            Ok(false)
+        }
+    }
+}
+
+/// Persist the OAuth tokens that came out of a successful sign-in.
+///
+/// After this, `steam_restore_session` can rebuild the session on future
+/// launches without another sign-in.
+#[tauri::command]
+pub fn steam_save_session(
+    state: AppStateHandle<'_>,
+    username: String,
+    steam_id: String,
+    access_token: String,
+    refresh_token: String,
+) -> Result<(), String> {
+    let session = crate::accounts::StoredSteamSession {
+        steam_id,
+        access_token,
+        refresh_token,
+        saved_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    state.accounts.set_session(&username, session)?;
+    log::info!("[steam-session] saved session for {username}");
     Ok(())
 }
 
@@ -347,4 +522,203 @@ pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<
     }
 
     Ok(None)
+}
+
+// ───────────────────────── OAuth sign-in ─────────────────────────
+//
+// The WebView2 form-filling path cannot get past Steam Guard: it fills the
+// password and presses the button, Steam answers with a GUARD page, and nothing
+// in a headless webview can approve a phone prompt. Steam's own OAuth API is
+// designed for this — it reports *which* guard is required, and accepts a code
+// typed by the user. `steamroom` wraps the whole flow.
+//
+// The flow is split across three commands because each step may need something
+// from the user (a code, or a tap on their phone), and a Tauri command cannot
+// stay suspended waiting for that.
+
+/// A pending OAuth sign-in that still needs a Steam Guard code or a mobile tap.
+///
+/// Kept in a process-wide slot because the challenge owns an open CM connection
+/// and cannot be serialised back to the frontend.
+static PENDING_GUARD: parking_lot::Mutex<Option<steamroom_client::login::GuardChallenge>> =
+    parking_lot::Mutex::new(None);
+
+#[derive(serde::Serialize)]
+pub struct OAuthBeginResult {
+    /// `approved` | `guard_code` | `mobile_confirm`
+    pub status: String,
+    /// For `guard_code`: the kinds Steam accepts ("device_code"/"email_code").
+    pub allowed_kinds: Vec<String>,
+    /// Set when the sign-in completed without any extra step.
+    pub steam_id: Option<String>,
+}
+
+fn guard_kind_name(k: steamroom::auth::GuardType) -> &'static str {
+    match k {
+        steamroom::auth::GuardType::DeviceCode => "device_code",
+        steamroom::auth::GuardType::EmailCode => "email_code",
+        steamroom::auth::GuardType::DeviceConfirmation => "device_confirmation",
+        _ => "other",
+    }
+}
+
+/// Turn a completed auth flow into a stored session + live webview cookies.
+async fn complete_oauth_login(
+    state: &AppStateHandle<'_>,
+    username: String,
+    approved: steamroom_client::login::ApprovedAuth,
+) -> Result<String, String> {
+    let tokens = approved.tokens().clone();
+
+    // The access token is a JWT; its `sub` claim is the SteamID64.
+    let steam_id = jwt_subject(&tokens.access_token)
+        .ok_or_else(|| "access token is missing a SteamID".to_string())?;
+
+    // Persist first: even if the browser part fails, the session is safe.
+    let session = crate::accounts::StoredSteamSession {
+        steam_id: steam_id.clone(),
+        access_token: tokens.access_token.clone(),
+        refresh_token: tokens.refresh_token.clone(),
+        saved_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    state
+        .accounts
+        .set_session(&username, session)
+        .map_err(|e| format!("save session: {e}"))?;
+
+    // Now make the webview authenticated so the Workshop UI works.
+    state.steam_webview.ensure_profile_loaded().await;
+    state
+        .steam_webview
+        .install_session_cookies(&steam_id, &tokens.access_token)
+        .map_err(|e| format!("install cookies: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    let _ = state.steam_webview.sync_cookies().await;
+    state.workshop.clear_caches();
+    let _ = state.app_handle.emit("steam-login-success", ());
+
+    // `finish()` sends the CM logon; do it last and ignore failure (the web
+    // session above is what the UI actually needs).
+    let _ = approved.finish().await;
+
+    Ok(steam_id)
+}
+
+/// `sub` claim of a Steam access-token JWT (the SteamID64).
+fn jwt_subject(token: &str) -> Option<String> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    let payload = token.split('.').nth(1)?;
+    let raw = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    json.get("sub")?.as_str().map(|s| s.to_string())
+}
+
+/// Start an OAuth sign-in with a username and password.
+///
+/// Returns `approved` when no Steam Guard is needed (a saved session exists, or
+/// Steam trusts this device); `guard_code` when the user must type a code;
+/// `mobile_confirm` when they must approve on their phone.
+#[tauri::command]
+pub async fn steam_oauth_begin(
+    state: AppStateHandle<'_>,
+    username: String,
+    password: String,
+) -> Result<OAuthBeginResult, String> {
+    let user = username.trim().to_string();
+    if user.is_empty() || password.is_empty() {
+        return Err("Username and password are required".into());
+    }
+
+    // Remember the credentials so a later retry (or a password change) works.
+    let _ = state.accounts.add_user_account(&user, &password);
+
+    let flow = LoginBuilder::new()
+        .device_name("WEave")
+        .with_credentials(&user, &password)
+        .begin()
+        .await
+        .map_err(|e| match e {
+            steamroom_client::login::LoginError::InvalidPassword => "INVALID_PASSWORD".to_string(),
+            other => format!("login failed: {other}"),
+        })?;
+
+    match flow {
+        CredentialsLoginFlow::Approved(auth) => {
+            let steam_id = complete_oauth_login(&state, user, auth).await?;
+            Ok(OAuthBeginResult {
+                status: "approved".into(),
+                allowed_kinds: Vec::new(),
+                steam_id: Some(steam_id),
+            })
+        }
+        CredentialsLoginFlow::NeedsGuardCode(challenge) => {
+            let kinds = challenge
+                .allowed_kinds()
+                .iter()
+                .map(|k| guard_kind_name(*k).to_string())
+                .collect();
+            *PENDING_GUARD.lock() = Some(challenge);
+            Ok(OAuthBeginResult {
+                status: "guard_code".into(),
+                allowed_kinds: kinds,
+                steam_id: None,
+            })
+        }
+        CredentialsLoginFlow::NeedsMobileConfirm(challenge) => {
+            // Wait for the tap inside this call; the UI shows a spinner meanwhile.
+            let approved = challenge
+                .wait_for_confirmation()
+                .await
+                .map_err(|e| format!("mobile confirmation failed: {e}"))?;
+            let steam_id = complete_oauth_login(&state, user, approved).await?;
+            Ok(OAuthBeginResult {
+                status: "approved".into(),
+                allowed_kinds: Vec::new(),
+                steam_id: Some(steam_id),
+            })
+        }
+        _ => Err("unsupported Steam confirmation flow".into()),
+    }
+}
+
+/// Submit the Steam Guard code the user typed.
+#[tauri::command]
+pub async fn steam_oauth_submit_guard(
+    state: AppStateHandle<'_>,
+    code: String,
+    kind: Option<String>,
+) -> Result<String, String> {
+    let challenge = PENDING_GUARD
+        .lock()
+        .take()
+        .ok_or_else(|| "no pending Steam Guard challenge".to_string())?;
+
+    let guard_kind = match kind.as_deref() {
+        Some("device_code") => steamroom::auth::GuardType::DeviceCode,
+        Some("email_code") => steamroom::auth::GuardType::EmailCode,
+        _ => *challenge
+            .allowed_kinds()
+            .first()
+            .ok_or_else(|| "no guard kind available".to_string())?,
+    };
+
+    let approved = match challenge.submit_code(code.trim(), guard_kind).await {
+        Ok(a) => a,
+        Err((challenge_back, e)) => {
+            // Keep the challenge alive so the user can retype the code.
+            *PENDING_GUARD.lock() = Some(challenge_back);
+            return Err(match e {
+                steamroom_client::login::LoginError::InvalidGuardCode => {
+                    "INVALID_GUARD_CODE".to_string()
+                }
+                other => format!("guard submit failed: {other}"),
+            });
+        }
+    };
+
+    let user = state.accounts.preferred_parser_credentials().username;
+    complete_oauth_login(&state, user, approved).await
 }

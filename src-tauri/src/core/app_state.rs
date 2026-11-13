@@ -121,7 +121,18 @@ impl AppState {
         log::info!("Initializing cookies from WebView2");
         let steam_webview = self.steam_webview.clone();
         let workshop = self.workshop.clone();
+        let accounts = self.accounts.clone();
         std::thread::spawn(move || {
+            // Wait for the main thread to reach the event loop.
+            //
+            // `init_cookies` is called from `setup()`, which itself runs on the
+            // main thread *before* the event loop starts. `create_hidden_window`
+            // has to be scheduled onto that thread, so a closure queued from here
+            // cannot run until setup returns. Blocking on it (which this used to
+            // do, with a 15s `recv_timeout`) therefore deadlocked the caller: the
+            // whole startup sync died silently and the app behaved as if the
+            // session had never been restored.
+            std::thread::sleep(std::time::Duration::from_millis(300));
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
                 // Create the hidden Steam webview first. Every cookie/session
@@ -129,7 +140,29 @@ impl AppState {
                 // not exist yet, and nothing used to create it at startup —
                 // so WebView2's persisted `steamLoginSecure` was never read
                 // and the user appeared signed out after every restart.
-                let restored = steam_webview.ensure_profile_loaded().await;
+                let profile_ready = steam_webview.ensure_profile_loaded().await;
+                log::info!("[startup] webview profile ready: {profile_ready}");
+
+                // Fast path: a stored OAuth session can rebuild the login
+                // cookies without any sign-in, so try that before falling back
+                // to whatever the WebView2 profile happens to hold.
+                // Resolve the session we would restore, if any.
+                let acct = accounts.preferred_parser_credentials().username;
+                let saved_session = accounts
+                    .session_for(&acct)
+                    .filter(|s| !s.steam_id.is_empty() && !s.access_token.is_empty());
+
+                let mut restored = false;
+                if let Some(session) = saved_session {
+                    let installed = steam_webview
+                        .install_session_cookies(&session.steam_id, &session.access_token)
+                        .is_ok();
+                    if installed {
+                        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                        restored = true;
+                        log::info!("[startup] installed saved session for {acct}");
+                    }
+                }
                 log::info!("[startup] steam session restored: {restored}");
                 let synced = match steam_webview.sync_cookies().await {
                     Ok(n) => {

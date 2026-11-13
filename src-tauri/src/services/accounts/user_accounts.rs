@@ -28,6 +28,47 @@ const ITERATIONS: u32 = 100_000;
 pub struct StoredUserAccount {
     pub username: String,
     pub password: String,
+    /// Steam OAuth session, once one has been established for this account.
+    ///
+    /// `#[serde(default)]` keeps files written by older builds readable — they
+    /// simply have no session yet and fall back to a password sign-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<StoredSteamSession>,
+}
+
+/// A Steam OAuth session, as persisted alongside the account.
+///
+/// Holding the tokens is what makes "sign in once, stay signed in" work:
+/// `access_token` can be turned straight into the `steamLoginSecure` cookie
+/// (`{steamid}%7C%7C{access_token}`), and `refresh_token` can mint a fresh
+/// access token when the old one expires — both without touching Steam Guard.
+///
+/// Everything here lives inside the AES-256-GCM blob in `user_accounts.enc`, so
+/// it is protected by the same machine-bound key as the password.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StoredSteamSession {
+    pub steam_id: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    /// Unix seconds, used to reason about token freshness.
+    #[serde(default)]
+    pub saved_at: u64,
+}
+
+impl StoredSteamSession {
+    /// Build the cookies that reconstruct a logged-in browser session.
+    ///
+    /// `steamLoginSecure` is `{steamid}%7C%7C{access_token}` — `%7C%7C` being the
+    /// URL-encoded form of `||`, which is exactly how Steam's own front end
+    /// spells it. The same value is valid on both the community and store
+    /// domains, so both get a copy.
+    pub fn login_cookies(&self) -> Vec<(&'static str, String)> {
+        let secure = format!("{}%7C%7C{}", self.steam_id, self.access_token);
+        vec![
+            ("steamcommunity.com", secure.clone()),
+            ("steampowered.com", secure),
+        ]
+    }
 }
 
 pub struct UserAccountsStore {
@@ -52,19 +93,50 @@ impl UserAccountsStore {
         self.accounts.lock().clone()
     }
 
+    /// Store an account, updating the password when the username already exists.
+    ///
+    /// This used to reject duplicates outright. That made re-signing-in useless:
+    /// the login flow calls this *after* a successful Steam sign-in, so a stale
+    /// password on disk could never be refreshed — every later auto-login failed
+    /// with the old credentials, and the UI only ever showed "login failed" with
+    /// no hint that the stored password was the problem.
     pub fn add(&self, username: &str, password: &str) -> Result<(), String> {
         if username.is_empty() || password.is_empty() {
             return Err("Username and password are required".into());
         }
         let mut guard = self.accounts.lock();
-        if guard.iter().any(|a| a.username == username) {
-            return Err("Account with this username already exists".into());
+        if let Some(existing) = guard.iter_mut().find(|a| a.username == username) {
+            existing.password = password.into();
+        } else {
+            guard.push(StoredUserAccount {
+                username: username.into(),
+                password: password.into(),
+                session: None,
+            });
         }
-        guard.push(StoredUserAccount {
-            username: username.into(),
-            password: password.into(),
-        });
         save_accounts(&self.file_path, &self.cipher, &guard)
+    }
+
+    /// Persist an OAuth session for one account.
+    ///
+    /// Called right after a successful sign-in so the next launch can skip the
+    /// login page entirely.
+    pub fn set_session(&self, username: &str, session: StoredSteamSession) -> Result<(), String> {
+        let mut guard = self.accounts.lock();
+        let Some(entry) = guard.iter_mut().find(|a| a.username == username) else {
+            return Err("Account not found".into());
+        };
+        entry.session = Some(session);
+        save_accounts(&self.file_path, &self.cipher, &guard)
+    }
+
+    /// The stored session for one account, if any.
+    pub fn session_for(&self, username: &str) -> Option<StoredSteamSession> {
+        self.accounts
+            .lock()
+            .iter()
+            .find(|a| a.username == username)
+            .and_then(|a| a.session.clone())
     }
 
     pub fn remove(&self, username: &str) -> Result<(), String> {

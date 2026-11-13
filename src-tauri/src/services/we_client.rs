@@ -883,6 +883,7 @@ mod tests {
     /// `Main`, so on every other machine `selectedwallpapers` resolved to
     /// None, `isActive` stayed false, and the preset-settings button was
     /// permanently greyed out.
+
     #[test]
     fn selected_wallpapers_reads_the_per_user_key() {
         let value: serde_json::Value = serde_json::from_str(

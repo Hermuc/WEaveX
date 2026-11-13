@@ -70,6 +70,7 @@ export default {
   steam_status: {
     logging_in: "正在登录 Steam",
     signed_in: "已登录",
+    signed_out: "未登录（可匿名浏览）",
     error: "登录失败",
   },
   preset_settings: {

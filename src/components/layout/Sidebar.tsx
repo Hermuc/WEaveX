@@ -4,6 +4,7 @@ import type { TranslationKey } from "@/i18n/types";
 
 import {
   AlertCircle,
+  UserRound,
   CheckCircle2,
   FolderHeart,
   Globe,
@@ -155,6 +156,16 @@ function visualsFor(phase: SteamSessionPhase): StatusVisuals | null {
         tone: "text-success",
         dotTone: "bg-success",
         labelKey: "steam_status.signed_in",
+      };
+    case "signed-out":
+      // Neutral, not alarming: the Workshop is fully usable without an
+      // account, so a bright red badge here would be misleading.
+      return {
+        Icon: UserRound,
+        spin: false,
+        tone: "text-muted",
+        dotTone: "bg-muted",
+        labelKey: "steam_status.signed_out",
       };
     case "error":
       return {

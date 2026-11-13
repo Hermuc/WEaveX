@@ -70,6 +70,7 @@ export default {
   steam_status: {
     logging_in: "Signing Steam",
     signed_in: "Signed in",
+    signed_out: "Not signed in (browsing anonymously)",
     error: "Sign-in failed",
   },
   preset_settings: {

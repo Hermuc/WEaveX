@@ -325,72 +325,130 @@ async function syncSteamSession() {
   }
   session.setLoggingIn();
 
+  // Hard ceiling on the whole startup sign-in dance.
+  //
+  // The steps below can each block for a long time (the legacy form-fill path
+  // alone spends 40s polling plus 12s on a community probe). If any of them
+  // wedges, the sidebar stayed on "signing in…" forever with no way for the
+  // user to tell whether the app was working. Cap it and settle on a neutral
+  // state instead of spinning indefinitely.
+  const SETTLE_AFTER_MS = 45_000;
+  const settleTimer = setTimeout(() => {
+    const s = useSteamSessionStore.getState();
+    if (s.phase === "logging-in") s.setSignedOut();
+  }, SETTLE_AFTER_MS);
+
   // Probe with retries before concluding the user is signed out.
   //
   // A single failed request is usually a network blip (or Steam rate-limiting
   // the profile endpoint), not an invalid session. Treating it as "logged out"
   // opened the login dialog, which used to wipe the stored cookies and turn a
   // transient hiccup into a permanent sign-out.
-  const probeAccount = async (): Promise<SteamAccountInfo | null> => {
+  type Probe =
+    | { state: "signed_in"; account: SteamAccountInfo }
+    | { state: "signed_out" }
+    | { state: "unknown" };
+
+  /// Probe the session, telling "failed to ask" apart from "not signed in".
+  ///
+  /// The old version used `steam_current_account`, whose `None` covers both a
+  /// genuinely anonymous session and a failed HTTP call. Because Steam's profile
+  /// page regularly takes 3-4s on this network, a slow start looked exactly like
+  /// a sign-out and raised a false "login failed" badge over a working account.
+  const probeAccount = async (): Promise<Probe> => {
+    let sawUnknown = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const info = await tryInvoke<SteamAccountInfo | null>(
-        "steam_current_account",
+      const res = await tryInvoke<Probe>(
+        "steam_probe_account",
         undefined,
-        null,
+        { state: "unknown" },
       );
-      if (info) return info;
+      if (res?.state === "signed_in") return res;
+      if (res?.state === "signed_out") return res;
+      sawUnknown = true;
       if (attempt < 2) {
         await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
       }
     }
-    return null;
+    return sawUnknown ? { state: "unknown" } : { state: "signed_out" };
   };
 
   try {
-    // First check if we have a valid session by hitting Steam directly.
-    // This is more reliable than trusting the cookie alone.
-    let info = await probeAccount();
+    // 1. Ask Steam who we are.
+    let probe = await probeAccount();
 
-    if (info) {
-      // Session is valid — we're already logged in.
-      session.setLoggedIn(info);
+    if (probe.state === "signed_in") {
+      session.setLoggedIn(probe.account);
       return;
     }
 
-    // No valid session found. Try auto-login with the parser credentials.
-    // `accountIndex: null` → use the dedicated parser credentials.
+    // If the probe could not reach Steam we know nothing. Leaving the store in
+    // its previous state is the honest answer: a red "login failed" badge for
+    // a network hiccup is exactly the bug this replaces.
+    if (probe.state === "unknown") {
+      session.setUnknownOrKeep();
+      return;
+    }
+
+    // 2. Nobody signed in per Steam. Try an OAuth session saved at the last
+    //    successful login — `{steamid, access_token}` rebuilds `steamLoginSecure`
+    //    and skips both the login page and Steam Guard.
+    const restored = await tryInvoke<boolean>(
+      "steam_restore_session",
+      { username: null },
+      false,
+    );
+    if (restored) {
+      probe = await probeAccount();
+      if (probe.state === "signed_in") {
+        session.setLoggedIn(probe.account);
+        return;
+      }
+    }
+
+    // 3. Fall back to the stored credentials (may hit Steam Guard).
     let ok = await tryInvoke<boolean>(
       "steam_auto_login",
       { accountIndex: null },
       false,
     );
 
-    // Verify the session is actually valid after auto-login.
+    // NEVER escalate to `force: true` here.
+    //
+    // `force` makes the backend run `logout_locked()`, which calls
+    // `clear_all_browsing_data()` and destroys `steamLoginSecure`. Doing that
+    // from a *startup heuristic* is how a signed-in user got logged out: the
+    // probe above already failed, so the retry could not confirm the session,
+    // and the force-re-login wiped a cookie that was perfectly valid. A forced
+    // re-login is only ever acceptable when the user explicitly asks for it.
     if (ok) {
-      info = await probeAccount();
-      if (info) {
-        session.setLoggedIn(info);
+      probe = await probeAccount();
+      if (probe.state === "signed_in") {
+        session.setLoggedIn(probe.account);
         return;
       }
-      // Cookie existed but session was stale — force re-login.
-      ok = await tryInvoke<boolean>(
-        "steam_auto_login",
-        { accountIndex: null, force: true },
-        false,
-      );
     }
 
-    if (ok) {
-      info = await probeAccount();
-      session.setLoggedIn(info ?? null);
-    } else {
-      // Only report an error after a real login attempt failed. Do NOT clear
-      // anything here: the stored session may still be perfectly valid and the
-      // next launch (or a later probe) can pick it up again.
-      session.setError();
+    {
+      // Distinguish "no account" from "signing in went wrong".
+      //
+      // Nothing here actually failed: we simply do not have credentials, or
+      // the automatic attempt could not complete without the user (Steam
+      // Guard). The Workshop stays browsable anonymously, so flagging this as
+      // an error painted a red "login failed" badge over a perfectly working
+      // app and made users think it was broken.
+      //
+      // A real failure is reported by the interactive login paths below
+      // (`steam_oauth_begin` / `steam_oauth_submit_guard`), which call
+      // `setError()` themselves.
+      // Do NOT clear stored state: the saved session may still be valid and a
+      // later probe can pick it up.
+      session.setSignedOut();
     }
   } catch {
     session.setError();
+  } finally {
+    clearTimeout(settleTimer);
   }
 }
 

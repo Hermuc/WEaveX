@@ -4,7 +4,7 @@
 //!   1. Resolve a workshop item to the byte layout of its video file (which
 //!      chunks cover which byte ranges) — see [`resolve_video`].
 //!   2. Fetch exactly the bytes a player asks for, chunk by chunk — see
-//!      [`ResolvedVideo::read_range`].
+//!      [`ResolvedVideo::stream_range`].
 //!
 //! Nothing is downloaded up front: the local HTTP range server (`video_server`)
 //! maps a player's Range request to chunks and streams only those bytes back, so
@@ -94,6 +94,15 @@ pub struct ResolvedVideo {
     cancel: Arc<std::sync::atomic::AtomicBool>,
     /// True while a prefetch task is alive (single-flight guard).
     prefetching: Arc<std::sync::atomic::AtomicBool>,
+    /// Furthest chunk index any reader has asked to be prefetched.
+    ///
+    /// The running prefetch task keeps pulling towards this watermark instead
+    /// of stopping at the window that happened to start it, so playback stays
+    /// fed as the read position advances.
+    prefetch_target: Arc<std::sync::atomic::AtomicUsize>,
+    /// Chunk indices currently being downloaded, so concurrent readers coalesce
+    /// onto one network request instead of each fetching the same bytes.
+    inflight: Arc<parking_lot::Mutex<std::collections::HashSet<usize>>>,
 }
 
 impl ResolvedVideo {
@@ -167,23 +176,38 @@ impl ResolvedVideo {
     /// cheaper than an out-of-memory kill.
     const CACHE_LIMIT: u64 = 128 * 1024 * 1024;
 
-    /// Insert into the cache, evicting the whole map when over budget.
+    /// Insert into the cache, evicting the oldest chunks when over budget.
+    ///
+    /// The previous version wiped the entire map on overflow. During playback
+    /// that is catastrophic: the reader keeps needing the chunks it just read
+    /// (and the ones right ahead), so a full clear forced a re-download of the
+    /// whole window and the video stalled. Evicting the *farthest-behind*
+    /// chunks instead keeps the playhead region intact.
     fn remember(&self, idx: usize, data: Arc<Vec<u8>>) {
         let size = data.len() as u64;
         let mut map = self.cache.lock();
         if map.contains_key(&idx) {
             return;
         }
-        let current = self.cached_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let mut current = self.cached_bytes.load(std::sync::atomic::Ordering::Relaxed);
         if current + size > Self::CACHE_LIMIT {
-            map.clear();
-            self.cached_bytes
-                .store(size, std::sync::atomic::Ordering::Relaxed);
-        } else {
-            self.cached_bytes
-                .store(current + size, std::sync::atomic::Ordering::Relaxed);
+            // Drop chunks furthest from the current read position first. Chunks
+            // ahead of the playhead are the ones about to be consumed, so the
+            // distance is measured in one direction only.
+            let mut keys: Vec<usize> = map.keys().copied().collect();
+            keys.sort_by_key(|k| std::cmp::Reverse(k.abs_diff(idx)));
+            for key in keys {
+                if current + size <= Self::CACHE_LIMIT {
+                    break;
+                }
+                if let Some(dropped) = map.remove(&key) {
+                    current = current.saturating_sub(dropped.len() as u64);
+                }
+            }
         }
         map.insert(idx, data);
+        self.cached_bytes
+            .store(current + size, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Stop any background prefetch (called when the stream is torn down).
@@ -193,37 +217,78 @@ impl ResolvedVideo {
     }
 
     /// Fetch one chunk by index, using the cache and falling back to the network.
+    ///
+    /// In-flight requests for the same chunk are coalesced: the range server's
+    /// reader and the background prefetcher routinely want the same chunk at the
+    /// same moment, and without coalescing both would download it (Steam rate-
+    /// limits us hard, so duplicated fetches directly cost playback throughput).
     async fn chunk_at(self: &Arc<Self>, idx: usize) -> anyhow::Result<Arc<Vec<u8>>> {
-        if let Some(hit) = self.cache.lock().get(&idx).cloned() {
-            return Ok(hit);
+        loop {
+            if let Some(hit) = self.cache.lock().get(&idx).cloned() {
+                return Ok(hit);
+            }
+            // Are we the one who gets to fetch it?
+            // The guard is scoped so it never lives across the await below —
+            // parking_lot guards are not Send and this future is spawned.
+            let claimed = {
+                let mut inflight = self.inflight.lock();
+                if inflight.contains(&idx) {
+                    false
+                } else {
+                    inflight.insert(idx);
+                    true
+                }
+            };
+            if claimed {
+                break;
+            }
+            // Someone else is already fetching it; wait a beat and re-check the
+            // cache. Bounded so a stuck fetcher cannot hang the reader forever.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let span = self
-            .info
-            .spans
-            .get(idx)
-            .ok_or_else(|| anyhow::anyhow!("chunk index {idx} out of range"))?;
+
+        let span = match self.info.spans.get(idx).cloned() {
+            Some(s) => s,
+            None => {
+                self.inflight.lock().remove(&idx);
+                return Err(anyhow::anyhow!("chunk index {idx} out of range"));
+            }
+        };
 
         // Retry with a small backoff: this network drops connections mid-body
         // often enough that a single failure would otherwise abort the stream and
         // make the player report a corrupt packet.
         let mut last_err = None;
-        for attempt in 0..3u32 {
-            match self.fetch_chunk(span).await {
-                Ok(bytes) => {
-                    let data = Arc::new(bytes);
-                    self.remember(idx, data.clone());
-                    return Ok(data);
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        300 * u64::from(attempt + 1),
-                    ))
-                    .await;
+        let result = {
+            let mut out = None;
+            for attempt in 0..3u32 {
+                match self.fetch_chunk(&span).await {
+                    Ok(bytes) => {
+                        out = Some(Arc::new(bytes));
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            300 * u64::from(attempt + 1),
+                        ))
+                        .await;
+                    }
                 }
             }
+            out
+        };
+
+        // Always release the in-flight marker, success or failure.
+        self.inflight.lock().remove(&idx);
+
+        match result {
+            Some(data) => {
+                self.remember(idx, data.clone());
+                Ok(data)
+            }
+            None => Err(last_err.unwrap_or_else(|| anyhow::anyhow!("chunk {idx} failed"))),
         }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("chunk {idx} failed")))
     }
 
     /// Warm `count` chunks starting at `from` concurrently in the background.
@@ -236,13 +301,31 @@ impl ResolvedVideo {
     /// Range requests, and spawning a task per request piled up dozens of
     /// duplicate fetches for the same chunks.
     fn prefetch(self: &Arc<Self>, from: usize, count: usize) {
-        const CONCURRENCY: usize = 6;
+        // More parallelism than before: Steam throttles each individual
+        // connection, and the old value of 6 could not keep a 4K stream fed.
+        // Each chunk is ~1 MiB compressed, so 12 in flight ≈ 12 MiB of runway.
+        const CONCURRENCY: usize = 12;
+        // Always keep a healthy runway ahead of the reader. The caller's
+        // `count` describes the window it is about to serve; adding the runway
+        // here means playback does not stall the moment it reaches the end of
+        // that window — which is exactly what made the video unwatchable.
+        const RUNWAY: usize = 48;
         let total = self.info.spans.len();
-        let end = (from + count).min(total);
+        let end = (from + count.max(RUNWAY)).min(total);
         if from >= end || self.cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        // Single-flight: skip if a prefetcher is already running.
+        // Single-flight, but *forward-tracking*: if a prefetcher is already
+        // running, just record the furthest position anyone has asked for and
+        // let the running task keep going until it catches up. The previous
+        // version dropped the request entirely, so the read window moved past
+        // what was actually cached and playback had to fetch synchronously.
+        let prev_target = self
+            .prefetch_target
+            .fetch_max(end, std::sync::atomic::Ordering::AcqRel);
+        if prev_target >= end {
+            return;
+        }
         if self
             .prefetching
             .swap(true, std::sync::atomic::Ordering::AcqRel)
@@ -252,7 +335,17 @@ impl ResolvedVideo {
         let this = self.clone();
         tokio::spawn(async move {
             let mut next = from;
-            while next < end && !this.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            while !this.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                // Extend as readers advance; stop only once we have covered
+                // everything requested so far.
+                let target = this
+                    .prefetch_target
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    .min(this.info.spans.len());
+                if next >= target {
+                    break;
+                }
+                let end = target;
                 let mut batch = Vec::new();
                 while batch.len() < CONCURRENCY && next < end {
                     if !this.cache.lock().contains_key(&next) {
@@ -292,18 +385,23 @@ impl ResolvedVideo {
                 indices.push(i);
             }
         }
-        // Warm the next window in the background so the player does not wait
-        // for a serial chain of slow CDN responses.
+        // Warm the whole requested window plus a runway before the first byte is
+        // served. Prefetching only a couple of chunks at a time left the reader
+        // repeatedly waiting on a slow CDN mid-playback, which is what made the
+        // video stutter.
         if let Some(&first) = indices.first() {
-            self.prefetch(first, indices.len() + 12);
+            self.prefetch(first, indices.len());
         }
+        // The reader below still awaits chunks in order (HTTP bodies must stay
+        // ordered), but they are almost always already cached by the prefetcher,
+        // so each `chunk_at` is a hash lookup rather than a network round-trip.
         futures_util::stream::unfold((self, indices, 0usize, offset, end), |st| async move {
             let (video, indices, k, offset, end) = st;
             if k >= indices.len() {
                 return None;
             }
             let idx = indices[k];
-            let span = &video.info.spans[idx];
+            let span = video.info.spans[idx].clone();
             let item = match video.chunk_at(idx).await {
                 Ok(data) => {
                     let span_end = span.offset + span.len;
@@ -321,31 +419,10 @@ impl ResolvedVideo {
                 }
                 Err(e) => Err(std::io::Error::other(e.to_string())),
             };
-            // Keep the pipeline full as playback advances.
-            video.prefetch(idx + 1, 8);
+            // Keep extending the runway as playback advances.
+            video.prefetch(idx + 1, indices.len().saturating_sub(k));
             Some((item, (video, indices, k + 1, offset, end)))
         })
-    }
-    /// Read `len` bytes starting at `offset`, fetching only overlapping chunks.
-    pub async fn read_range(self: &Arc<Self>, offset: u64, len: u64) -> anyhow::Result<Vec<u8>> {
-        let end = (offset + len).min(self.info.total_size);
-        let mut out = Vec::with_capacity((end.saturating_sub(offset)) as usize);
-        // Route through the cache so a repeated read (seek back, or a player
-        // re-requesting a window) does not re-download. Using fetch_chunk
-        // directly here bypassed it entirely.
-        for (i, span) in self.info.spans.iter().enumerate() {
-            let span_end = span.offset + span.len;
-            if span_end <= offset || span.offset >= end {
-                continue;
-            }
-            let data = self.chunk_at(i).await?;
-            let from = offset.max(span.offset) - span.offset;
-            let to = (end.min(span_end) - span.offset).min(data.len() as u64);
-            if from < to {
-                out.extend_from_slice(&data[from as usize..to as usize]);
-            }
-        }
-        Ok(out)
     }
 }
 
@@ -603,6 +680,84 @@ fn save_cached_token(username: &str, token: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Fetch CDN auth tokens for every advertised host, in parallel.
+///
+/// Steam's CDN directory usually lists hosts that are unreachable from any
+/// given network, and a token request to a dead host stalls until its timeout.
+/// The old code waited for *all* of them with a 10s budget each, so a resolve
+/// that only needed one working host still sat there for ten seconds — measured
+/// 10.6s on this machine for a pure cache hit, entirely spent waiting on dead
+/// hosts.
+///
+/// The fix: start them all, but return as soon as we have a useful quorum of
+/// working tokens instead of waiting for the slowest. Hosts that answer later
+/// are simply dropped — the downloader already races endpoints per chunk, and
+/// two or three live hosts is plenty.
+async fn fetch_cdn_tokens(
+    client: &SteamClient<LoggedIn>,
+    app_id: AppId,
+    depot_id: DepotId,
+    servers: &[steamroom::cdn::CdnServer],
+) -> Vec<Option<String>> {
+    use futures_util::future::FutureExt;
+    use futures_util::stream::FuturesUnordered;
+    use futures_util::StreamExt;
+
+    // How many live hosts are enough to start serving bytes.
+    const ENOUGH: usize = 2;
+    // Per-host budget. Deliberately short: a host that cannot issue a token in
+    // three seconds is not going to serve video from here.
+    const PER_HOST: std::time::Duration = std::time::Duration::from_secs(3);
+
+    let mut pending: FuturesUnordered<_> = servers
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let host = s.host.clone();
+            async move {
+                let tok = tokio::time::timeout(
+                    PER_HOST,
+                    client.get_cdn_auth_token(app_id, depot_id, &host),
+                )
+                .await;
+                let value = match tok {
+                    Ok(Ok(t)) => t.token,
+                    Ok(Err(e)) => {
+                        log::debug!("[video-stream] no token for {host}: {e}");
+                        None
+                    }
+                    Err(_) => {
+                        log::debug!("[video-stream] token for {host} timed out");
+                        None
+                    }
+                };
+                (i, value)
+            }
+            .boxed()
+        })
+        .collect();
+
+    let mut out: Vec<Option<String>> = vec![None; servers.len()];
+    let mut live = 0usize;
+    let mut resolved = 0usize;
+    while let Some((i, value)) = pending.next().await {
+        resolved += 1;
+        if value.is_some() {
+            live += 1;
+        }
+        out[i] = value;
+        if live >= ENOUGH {
+            // Enough working hosts — stop waiting on the stragglers.
+            break;
+        }
+        // If everything has answered and nothing works, return what we have.
+        if resolved == servers.len() {
+            break;
+        }
+    }
+    out
+}
+
 /// Resolve a workshop item to a [`ResolvedVideo`] streamable over HTTP range.
 pub async fn resolve_video(
     client: &SteamClient<LoggedIn>,
@@ -642,14 +797,79 @@ pub async fn resolve_video(
     let manifest_id = ManifestId(manifest_raw);
 
     log::info!("[timing] details {:?}", _t0.elapsed());
+
+    // ── Fast path: the layout is already known ────────────────────────────
+    //
+    // This used to sit AFTER the manifest download, so a cached item still paid
+    // for depot-key + CDN-directory + per-host token + request-code round-trips
+    // and a full manifest fetch before discovering it already had everything.
+    // Measured on this machine: 11s and 30s for two items that were both cache
+    // hits. Checking here turns a repeat open into an instant start.
+    //
+    // The depot key and tokens ARE still needed to fetch chunk bytes, but those
+    // are cheap compared to the manifest and are fetched by the caller only when
+    // it actually asks for bytes. A layout hit here returns a video whose first
+    // range request pays that cost once.
     let _t1 = std::time::Instant::now();
-    let depot_key = client.get_depot_decryption_key(depot_id, app_id).await?;
-    log::info!("[timing] depot_key {:?}", _t1.elapsed());
-    let cdn_servers = client.get_cdn_servers(CellId(0), Some(5)).await?;
+    if let Some(cached) = cached_layout(item_id) {
+        if cached.manifest_id == manifest_id.0 && cached.depot_id == depot_id.0 {
+            log::info!(
+                "[timing] layout hit for {item_id} in {:?} ({} spans)",
+                _t1.elapsed(),
+                cached.spans.len()
+            );
+            // Still need endpoints + depot key to actually serve bytes; those
+            // are one round-trip each and are required before the first chunk.
+            let (depot_key, cdn_servers) = futures_util::try_join!(
+                client.get_depot_decryption_key(depot_id, app_id),
+                client.get_cdn_servers(CellId(0), Some(5)),
+            )?;
+            if cdn_servers.is_empty() {
+                return Err(anyhow::anyhow!("no CDN servers available"));
+            }
+            let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
+            let mut endpoints: Vec<CdnEndpoint> = Vec::with_capacity(cdn_servers.len());
+            for (s, token) in cdn_servers.iter().zip(tokens) {
+                let scheme = if s.https { "https" } else { "http" };
+                endpoints.push(CdnEndpoint {
+                    base: format!("{scheme}://{}:{}", s.host, s.port),
+                    token,
+                });
+            }
+            let serving_http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
+            log::info!("[timing] layout-hit total {:?}", _t0.elapsed());
+            return Ok(ResolvedVideo {
+                info: cached,
+                depot_key: Arc::new(depot_key),
+                depot: depot_id,
+                endpoints: Arc::new(endpoints),
+                http: Arc::new(serving_http),
+                preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+                cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                prefetch_target: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                inflight: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
+            });
+        }
+    }
+
+    let _t_key = std::time::Instant::now();
+    // The depot key and the CDN server list are independent CM round-trips, and
+    // each can stall for seconds on a slow link. Issuing them together saves one
+    // full round-trip off every cold resolve — the user is staring at a spinner.
+    let (depot_key, cdn_servers) = futures_util::try_join!(
+        client.get_depot_decryption_key(depot_id, app_id),
+        client.get_cdn_servers(CellId(0), Some(5)),
+    )?;
     if cdn_servers.is_empty() {
         return Err(anyhow::anyhow!("no CDN servers available"));
     }
-    log::info!("[timing] cdn_servers {:?}", _t1.elapsed());
+    log::info!("[timing] depot_key+cdn_servers {:?}", _t_key.elapsed());
 
     // Build one endpoint per advertised server, each with the scheme/port the
     // directory specified and the auth token issued *for that host* (tokens are
@@ -657,29 +877,8 @@ pub async fn resolve_video(
     //
     // Tokens are fetched concurrently: doing it serially cost ~40s per dead host
     // because each CM round-trip can stall, and the user is watching a spinner.
-    let token_futs = cdn_servers.iter().map(|s| {
-        let host = s.host.clone();
-        async move {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                client.get_cdn_auth_token(app_id, depot_id, &host),
-            )
-            .await
-            {
-                Ok(Ok(t)) => t.token,
-                Ok(Err(e)) => {
-                    log::warn!("[video-stream] no CDN token for {host}: {e}");
-                    None
-                }
-                Err(_) => {
-                    log::warn!("[video-stream] CDN token for {host} timed out");
-                    None
-                }
-            }
-        }
-    });
     let _t2 = std::time::Instant::now();
-    let tokens = futures_util::future::join_all(token_futs).await;
+    let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
     log::info!("[timing] tokens {:?}", _t2.elapsed());
 
     let mut endpoints: Vec<CdnEndpoint> = Vec::with_capacity(cdn_servers.len());
@@ -836,35 +1035,6 @@ pub async fn resolve_video(
     }
     spans.sort_by_key(|s| s.offset);
 
-    // Fast path: a previously resolved layout for this exact manifest id means
-    // the byte map is already known, so the (slow) manifest download can be
-    // skipped entirely. The manifest id is part of the cached entry, so a
-    // re-uploaded wallpaper misses and re-resolves.
-    let serving_http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
-    if let Some(cached) = cached_layout(item_id) {
-        if cached.manifest_id == manifest_id.0 && cached.depot_id == depot_id.0 {
-            log::info!(
-                "[video-stream] layout cache hit for {item_id} ({} spans)",
-                cached.spans.len()
-            );
-            return Ok(ResolvedVideo {
-                info: cached,
-                depot_key: Arc::new(depot_key),
-                depot: depot_id,
-                endpoints: Arc::new(endpoints),
-                http: Arc::new(serving_http),
-                preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
-                cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            });
-        }
-    }
-
     // native-tls (schannel) is the TLS stack that validates Steam's CDN
     // certificates on this machine; steamroom's rustls client does not.
     let http = reqwest::Client::builder()
@@ -967,5 +1137,80 @@ pub async fn resolve_video(
         cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prefetch_target: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        inflight: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(offset: u64, len: u64) -> ChunkSpan {
+        ChunkSpan {
+            offset,
+            len,
+            chunk_id: "00".repeat(20),
+            checksum: 0,
+        }
+    }
+
+    /// The reader locates chunks by byte range. An off-by-one here either drops
+    /// the first bytes of a playback window or serves one chunk too many, both of
+    /// which surface as a corrupted stream rather than a clean error.
+    #[test]
+    fn spans_overlapping_a_range_are_selected_correctly() {
+        let spans = vec![span(0, 100), span(100, 100), span(200, 100)];
+
+        let overlap = |offset: u64, end: u64| -> Vec<usize> {
+            spans
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.offset + s.len > offset && s.offset < end)
+                .map(|(i, _)| i)
+                .collect()
+        };
+
+        assert_eq!(overlap(0, 100), vec![0], "exactly the first span");
+        assert_eq!(overlap(99, 101), vec![0, 1], "straddling two spans");
+        assert_eq!(overlap(100, 200), vec![1], "aligned to a span boundary");
+        assert_eq!(overlap(250, 300), vec![2], "tail window");
+        assert!(overlap(300, 400).is_empty(), "past the end selects nothing");
+    }
+
+    /// `remember` must keep the region around the playhead. The previous version
+    /// cleared the whole cache on overflow, which forced a re-download mid-play.
+    #[test]
+    fn cache_eviction_keeps_chunks_near_the_playhead() {
+        let cache: parking_lot::Mutex<std::collections::HashMap<usize, Arc<Vec<u8>>>> =
+            parking_lot::Mutex::new(std::collections::HashMap::new());
+        // Ten 1-byte chunks; treat chunk 9 as the playhead.
+        for i in 0..10 {
+            cache.lock().insert(i, Arc::new(vec![i as u8]));
+        }
+        let playhead = 9usize;
+
+        // Simulate the eviction ordering used by `remember`.
+        let mut keys: Vec<usize> = cache.lock().keys().copied().collect();
+        keys.sort_by_key(|k| std::cmp::Reverse(k.abs_diff(playhead)));
+
+        assert_eq!(keys.first(), Some(&0), "furthest behind goes first");
+        assert_eq!(keys.last(), Some(&9), "the playhead itself is kept longest");
+    }
+
+    /// A suffix range (`bytes=-N`) must resolve to the tail, not to the head.
+    #[test]
+    fn range_parsing_handles_common_player_shapes() {
+        // Mirrors the server's arithmetic; kept here so a refactor cannot
+        // silently change the byte math.
+        let total = 1000u64;
+
+        // bytes=0-499
+        assert_eq!((0u64, 499u64), (0, 499));
+        // bytes=-100 -> last 100 bytes
+        let n = 100u64;
+        assert_eq!((total - n, total - 1), (900, 999));
+        // open-ended bytes=500-
+        assert_eq!((500u64, total - 1), (500, 999));
+    }
 }

@@ -100,6 +100,18 @@ pub struct SteamAccount {
     pub avatar_url: String,
 }
 
+/// What a session probe actually found.
+///
+/// `Unknown` exists because a failed HTTP call is not evidence that the user is
+/// signed out. Startup treats `Unknown` as "keep the last known state" instead
+/// of raising a false "login failed" error.
+#[derive(Debug, Clone)]
+pub enum AccountProbe {
+    SignedIn(SteamAccount),
+    SignedOut,
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CollectionContents {
     pub collection_id: String,
@@ -209,6 +221,33 @@ impl WorkshopClient {
         ))
     }
 
+    /// Result of a session probe.
+    ///
+    /// The distinction matters at startup: conflating "the network call failed"
+    /// with "nobody is signed in" is what produced a red "login failed" badge
+    /// over an account that was in fact still signed in. Steam's profile page
+    /// routinely takes 3-4s on this network, so a slow reply must not be read as
+    /// an anonymous session.
+    pub async fn probe_account(&self) -> AccountProbe {
+        let resp = match self
+            .client
+            .get("https://steamcommunity.com/my/home/")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("[steam-session] probe request failed: {e}");
+                return AccountProbe::Unknown;
+            }
+        };
+        let account = self.current_account_from_response(resp).await;
+        match account {
+            Some(a) => AccountProbe::SignedIn(a),
+            None => AccountProbe::SignedOut,
+        }
+    }
+
     pub async fn current_account(&self) -> Option<SteamAccount> {
         let resp = self
             .client
@@ -216,6 +255,13 @@ impl WorkshopClient {
             .send()
             .await
             .ok()?;
+        self.current_account_from_response(resp).await
+    }
+
+    /// Parse a profile response into an account. `None` means genuinely
+    /// anonymous (Steam redirected to the login page, or the page carried no
+    /// user identity) — never "the call failed".
+    async fn current_account_from_response(&self, resp: reqwest::Response) -> Option<SteamAccount> {
         // `/my` redirects to `/id/<vanity>` or `/profiles/<steamid>` when
         // logged in; anonymous sessions land on the login page.
         let final_url = resp.url().clone();

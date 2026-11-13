@@ -108,12 +108,14 @@ export default function App() {
 
   const hasAutoOpened = useRef(false);
   useEffect(() => {
-    if (
-      !ready ||
-      sessionPhase !== "error" ||
-      !showLoginPromptOnFail ||
-      hasAutoOpened.current
-    ) {
+    // Prompt when there is no account — not only on hard failures.
+    //
+    // `signed-out` is the normal "browse anonymously" state: the user may
+    // simply have dismissed the dialog. `error` means an attempt failed. Both
+    // are worth offering a sign-in for, but neither should keep re-prompting
+    // once the user has said no (`hasAutoOpened`).
+    const needsSignIn = sessionPhase === "signed-out" || sessionPhase === "error";
+    if (!ready || !needsSignIn || !showLoginPromptOnFail || hasAutoOpened.current) {
       return;
     }
     // Wait before prompting. A session check can fail for purely transient
@@ -123,7 +125,7 @@ export default function App() {
     // retry succeed, and the modal is then never shown.
     const timer = setTimeout(() => {
       const state = useSteamSessionStore.getState();
-      if (state.phase !== "error" || hasAutoOpened.current) return;
+      if ((state.phase !== "signed-out" && state.phase !== "error") || hasAutoOpened.current) return;
       hasAutoOpened.current = true;
       setLoginModalOpen(true, "auto");
     }, 5000);

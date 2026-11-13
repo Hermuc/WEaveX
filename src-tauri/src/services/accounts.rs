@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod user_accounts;
 
+pub use user_accounts::StoredSteamSession;
 use user_accounts::UserAccountsStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +99,16 @@ impl AccountManager {
         self.user_store.add(username, password)
     }
 
+    /// Persist a Steam OAuth session for one account.
+    pub fn set_session(&self, username: &str, session: StoredSteamSession) -> Result<(), String> {
+        self.user_store.set_session(username, session)
+    }
+
+    /// The stored OAuth session for one account, if any.
+    pub fn session_for(&self, username: &str) -> Option<StoredSteamSession> {
+        self.user_store.session_for(username)
+    }
+
     pub fn remove_user_account(&self, username: &str) -> Result<(), String> {
         self.user_store.remove(username)
     }
@@ -149,6 +160,97 @@ mod tests {
     /// Acceptance test for dropping the bundled pool: a single user account
     /// must satisfy every consumer of credentials — the parser session, the
     /// download path, and the retry-loop budget.
+    /// Re-signing in must refresh the stored password, not be rejected.
+    ///
+    /// `accounts_set_custom` runs after a successful Steam sign-in. When it
+    /// refused duplicates, a changed password could never be persisted: the
+    /// stale credential on disk made every subsequent auto-login fail, and the
+    /// user saw only "login failed" with no way to recover short of deleting
+    /// the account file.
+    /// The full round-trip the app performs on every restart: save, reopen the
+    /// store from disk, and confirm the credentials come back usable.
+
+    /// `steamLoginSecure` must be `{steamid}%7C%7C{access_token}`.
+    ///
+    /// This exact spelling is what Steam's own front end uses; anything else is
+    /// silently rejected and the user sees an endless "not signed in" loop.
+    #[test]
+    fn session_cookies_use_the_steam_login_secure_format() {
+        let session = StoredSteamSession {
+            steam_id: "76561198000000001".into(),
+            access_token: "eyJhbGciOiJSUzI1NiJ9.test".into(),
+            refresh_token: "refresh-abc".into(),
+            saved_at: 0,
+        };
+        let cookies = session.login_cookies();
+        assert_eq!(cookies.len(), 2, "community and store domains");
+        assert_eq!(cookies[0].0, "steamcommunity.com");
+        assert_eq!(cookies[1].0, "steampowered.com");
+        assert_eq!(
+            cookies[0].1,
+            "76561198000000001%7C%7CeyJhbGciOiJSUzI1NiJ9.test"
+        );
+    }
+
+    /// A session must survive the encrypted round-trip, including its tokens.
+    #[test]
+    fn session_survives_a_restart() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mgr = AccountManager::from_runtime(dir.path());
+            mgr.add_user_account("re_ann1", "pw").unwrap();
+            mgr.set_session(
+                "re_ann1",
+                StoredSteamSession {
+                    steam_id: "76561198000000001".into(),
+                    access_token: "access".into(),
+                    refresh_token: "refresh".into(),
+                    saved_at: 12345,
+                },
+            )
+            .unwrap();
+        }
+        let reopened = AccountManager::from_runtime(dir.path());
+        let s = reopened
+            .session_for("re_ann1")
+            .expect("session must persist");
+        assert_eq!(s.steam_id, "76561198000000001");
+        assert_eq!(s.access_token, "access");
+        assert_eq!(s.refresh_token, "refresh");
+    }
+
+    #[test]
+    fn saved_account_survives_a_restart() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mgr = AccountManager::from_runtime(dir.path());
+            mgr.add_user_account("re_ann1", "secret").unwrap();
+        }
+        // Fresh instance = what AppState::initialize does on the next launch.
+        let reopened = AccountManager::from_runtime(dir.path());
+        let creds = reopened.preferred_parser_credentials();
+        assert_eq!(creds.username, "re_ann1", "username must survive restart");
+        assert_eq!(
+            creds.password, "secret",
+            "password must decrypt after restart"
+        );
+    }
+
+    #[test]
+    fn re_adding_an_account_updates_the_password() {
+        let dir = TempDir::new().unwrap();
+        let mgr = AccountManager::from_runtime(dir.path());
+        mgr.add_user_account("re_ann1", "old-password").unwrap();
+        mgr.add_user_account("re_ann1", "new-password").unwrap();
+
+        let creds = mgr.preferred_parser_credentials();
+        assert_eq!(creds.username, "re_ann1");
+        assert_eq!(creds.password, "new-password", "password must be refreshed");
+
+        // And there must still be exactly one entry, not a duplicate.
+        assert_eq!(mgr.list_custom_usernames().len(), 1);
+    }
+
     #[test]
     fn single_account_covers_every_consumer() {
         let dir = TempDir::new().unwrap();

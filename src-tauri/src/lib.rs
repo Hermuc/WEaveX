@@ -55,9 +55,21 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
+                // Showing a window that has not had its size applied yet leaves it at
+                // the platform default, which on Windows can be a handful of pixels —
+                // the app then looks like it failed to start. Make sure the size is
+                // sane before revealing it.
+                let healthy = window
+                    .outer_size()
+                    .map(|s| s.width >= 400 && s.height >= 300)
+                    .unwrap_or(false);
+                if !healthy {
+                    let _ = window.set_size(tauri::PhysicalSize::new(1200, 700));
+                    let _ = window.center();
+                }
+                let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
-                let _ = window.unminimize();
             }
         }))
         .plugin(tauri_plugin_shell::init())
@@ -169,6 +181,11 @@ pub fn run() {
             commands::steam::steam_qr_poll,
             commands::steam::steam_qr_login_finalize,
             commands::steam::steam_login_poll_error,
+            commands::steam::steam_restore_session,
+            commands::steam::steam_save_session,
+            commands::steam::steam_probe_account,
+            commands::steam::steam_oauth_begin,
+            commands::steam::steam_oauth_submit_guard,
             commands::dotnet::dotnet_get_root,
             commands::dotnet::dotnet_init,
             commands::plugins::plugins_init,

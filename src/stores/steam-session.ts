@@ -9,10 +9,20 @@ import { create } from "zustand";
  *
  *  - `logging-in`  — auto-login is in flight (animated spinner).
  *  - `logged-in`   — signed in to Steam.
- *  - `error`       — auto-login failed (bad/stale credentials, Steam Guard…).
+ *  - `signed-out`  — no account is signed in, but nothing went wrong. The
+ *                    Workshop still works anonymously, so this is a neutral
+ *                    state, not an error. It is what the user gets after
+ *                    dismissing the login prompt.
+ *  - `error`       — a sign-in attempt actually failed (bad password, a Steam
+ *                    Guard challenge that never completed, …).
  *  - `idle`        — nothing has happened yet (also the non-Tauri default).
  */
-export type SteamSessionPhase = "idle" | "logging-in" | "logged-in" | "error";
+export type SteamSessionPhase =
+  | "idle"
+  | "logging-in"
+  | "logged-in"
+  | "signed-out"
+  | "error";
 
 export interface SteamAccountInfo {
   persona_name: string;
@@ -29,6 +39,10 @@ interface SteamSessionStore {
   setLoggingIn: () => void;
   setLoggedIn: (account: SteamAccountInfo | null) => void;
   setError: () => void;
+  /// No account signed in, but nothing failed.
+  setSignedOut: () => void;
+  /// The probe could not reach Steam; keep whatever we already knew.
+  setUnknownOrKeep: () => void;
 }
 
 export const useSteamSessionStore = create<SteamSessionStore>((set) => ({
@@ -42,4 +56,7 @@ export const useSteamSessionStore = create<SteamSessionStore>((set) => ({
       account: account ?? null,
     }),
   setError: () => set({ phase: "error", account: null }),
+  setSignedOut: () => set({ phase: "signed-out", account: null }),
+  setUnknownOrKeep: () =>
+    set((s) => (s.phase === "idle" ? { phase: "signed-out" } : {})),
 }));

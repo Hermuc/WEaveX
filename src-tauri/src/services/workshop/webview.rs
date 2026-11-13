@@ -16,8 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::cookie::{CookieStore, Jar};
-use reqwest::header::HeaderValue;
+use reqwest::cookie::Jar;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -43,6 +42,9 @@ pub struct SteamWebview {
     data_dir: PathBuf,
     jar: Arc<Jar>,
     lock: Mutex<()>,
+    /// One-shot guard for `ensure_community_session`. See that method for why
+    /// repeating the attempt is actively harmful.
+    community_attempted: std::sync::atomic::AtomicBool,
 }
 
 impl SteamWebview {
@@ -53,6 +55,7 @@ impl SteamWebview {
             data_dir,
             jar,
             lock: Mutex::new(()),
+            community_attempted: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -153,16 +156,35 @@ impl SteamWebview {
                 return false;
             }
             // Wait for the main thread to finish building the window.
+            //
+            // This runs on a worker thread, so blocking here is safe *provided*
+            // the main thread is already pumping its event loop. The caller in
+            // `app_state` sleeps briefly before getting here to guarantee that;
+            // without it the closure below could never be delivered.
             match rx.recv_timeout(Duration::from_secs(15)) {
                 Ok(true) => true,
-                _ => {
-                    log::warn!("[steam-webview] hidden window was not created at startup");
+                Ok(false) => {
+                    log::warn!("[steam-webview] hidden window creation failed");
+                    return false;
+                }
+                Err(e) => {
+                    log::warn!("[steam-webview] hidden window was not created in time: {e}");
                     return false;
                 }
             }
         } else {
             false
         };
+        // IMPORTANT: nothing slow may happen past this point.
+        //
+        // This method is called from `steam_current_account`, which the frontend
+        // polls constantly, and it holds `self.lock` for its whole body. A
+        // previous version tried to re-establish the community session here
+        // (a 12-second navigate-and-wait loop), which meant every poll — and
+        // every `sync_cookies` behind it — queued for twelve seconds. That is
+        // what made the app feel frozen and starved the video stream. The
+        // community session is established in `auto_login` instead, where a
+        // real sign-in is happening and the wait is expected.
         if !freshly_created {
             return self.is_logged_in_inner();
         }
@@ -174,6 +196,54 @@ impl SteamWebview {
             sleep(Duration::from_millis(150)).await;
         }
         false
+    }
+
+    /// Install a saved Steam session into the webview's cookie store.
+    ///
+    /// This is the payoff of persisting `{steamid, access_token}`:
+    /// `steamLoginSecure` is exactly `{steamid}%7C%7C{access_token}`, so writing
+    /// that one cookie authenticates the whole webview — no login page, no
+    /// Steam Guard, no password.
+    ///
+    /// It must go through `set_cookie`, not `document.cookie`: Steam marks
+    /// `steamLoginSecure` HttpOnly, and script-visible cookie writes silently
+    /// ignore HttpOnly names.
+    pub fn install_session_cookies(
+        &self,
+        steam_id: &str,
+        access_token: &str,
+    ) -> Result<(), String> {
+        let Some(w) = self.app.get_webview_window(LABEL) else {
+            return Err("webview window not ready".into());
+        };
+        let secure = format!("{steam_id}%7C%7C{access_token}");
+        // A random session id is fine: Steam only uses it as a CSRF token, it
+        // is not tied to the account.
+        let session_id: String = {
+            use rand::RngExt;
+            rand::rng()
+                .sample_iter(&rand::distr::Alphanumeric)
+                .take(32)
+                .map(char::from)
+                .collect::<String>()
+                .to_lowercase()
+        };
+        for domain in ["steamcommunity.com", "steampowered.com"] {
+            for (name, value) in [
+                ("steamLoginSecure", secure.as_str()),
+                ("sessionid", session_id.as_str()),
+            ] {
+                let cookie = tauri::webview::Cookie::build((name, value))
+                    .domain(domain)
+                    .path("/")
+                    .secure(true)
+                    .http_only(true)
+                    .build();
+                w.set_cookie(cookie).map_err(|e| e.to_string())?;
+            }
+        }
+        log::info!("[steam-webview] installed saved session cookies");
+        Ok(())
     }
 
     /// Show the webview window so the user can interact with Steam's login
@@ -374,26 +444,44 @@ impl SteamWebview {
         let steam_pow = "https://store.steampowered.com"
             .parse::<url::Url>()
             .map_err(|e| e.to_string())?;
+        // Build `Cookie` values directly instead of formatting a Set-Cookie
+        // header by hand.
+        //
+        // The hand-built header (`name=value; Path=...; Domain=...`) omitted the
+        // attributes that make a cookie apply to subsequent requests. In
+        // particular it produced a *host-only* cookie whenever the domain
+        // attribute was dropped during parsing, and `steamLoginSecure` for
+        // `steamcommunity.com` then never matched `steamcommunity.com/my/...`.
+        // Using the typed API sets domain/path/secure/httponly explicitly and
+        // leaves no room for a malformed header to be silently skipped.
         let mut n = 0;
         for c in cookies {
             let domain = c.domain().unwrap_or("steamcommunity.com").to_string();
             if !(domain.ends_with("steamcommunity.com") || domain.ends_with("steampowered.com")) {
                 continue;
             }
-            let path = c.path().unwrap_or("/").to_string();
             let name = c.name().to_string();
             let value = c.value().to_string();
-            let header = format!("{}={}; Path={}; Domain={}", name, value, path, domain);
-            if let Ok(hv) = header.parse::<HeaderValue>() {
-                let values = [hv];
-                let target = if domain.ends_with("steampowered.com") {
-                    &steam_pow
-                } else {
-                    &steam_com
-                };
-                self.jar.set_cookies(&mut values.iter(), target);
-                n += 1;
-            }
+
+            let path = c.path().unwrap_or("/").to_string();
+            // `Domain=` must be present: without it the cookie becomes host-only
+            // and stops matching the sub-paths we actually request. Keep the
+            // leading dot so subdomains match too.
+            let domain_attr = if domain.starts_with('.') {
+                domain.clone()
+            } else {
+                format!(".{domain}")
+            };
+            let cookie_str =
+                format!("{name}={value}; Domain={domain_attr}; Path={path}; Secure; HttpOnly");
+            let target = if domain.ends_with("steampowered.com") {
+                &steam_pow
+            } else {
+                &steam_com
+            };
+            self.jar.add_cookie_str(&cookie_str, target);
+            log::info!("[cookie-sync] stored {name} @ {domain_attr} path={path}");
+            n += 1;
         }
         Ok(n)
     }
@@ -527,18 +615,26 @@ impl SteamWebview {
         // Do not create the window to probe the session: a session implies
         // the window already exists, so a missing window means "not logged in".
         if !self.window_exists() {
+            log::warn!("[login-flow] abort: hidden window does not exist");
             return Ok(false);
         }
 
         // Early return if we're already logged in from a previous run,
         // unless the caller explicitly wants to force a re-login.
         if !force && self.is_logged_in_inner() {
+            log::info!("[login-flow] session cookie already present; nothing to do");
             return Ok(true);
         }
 
         let Some(w) = self.app.get_webview_window(LABEL) else {
+            log::warn!("[login-flow] abort: window handle unavailable");
             return Ok(false);
         };
+
+        log::info!(
+            "[login-flow] start (force={force}, has_session_cookie={})",
+            self.is_logged_in_inner()
+        );
 
         if force {
             // Log out through Steam rather than wiping the whole WebView2
@@ -552,6 +648,11 @@ impl SteamWebview {
         w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
             .map_err(|e| e.to_string())?;
         sleep(Duration::from_millis(3000)).await;
+        let landed = w.url().map(|u| u.to_string()).unwrap_or_default();
+        log::info!(
+            "[login-flow] navigated; url_host_has_login={}",
+            landed.contains("/login")
+        );
 
         // Fill + submit the login form. Retry a few times: the SPA may render
         // the inputs asynchronously, and the first eval can land before them.
@@ -559,19 +660,57 @@ impl SteamWebview {
         // cookie — the old session may be stale and we always want to
         // submit fresh credentials.
         let script = build_login_script(username, password);
+        let mut submitted = 0;
+        let mut last_verdict = String::from("(none)");
         for _ in 0..6 {
             w.eval(&script).map_err(|e| e.to_string())?;
+            submitted += 1;
             sleep(Duration::from_millis(800)).await;
+            // The script writes its outcome into the URL fragment because
+            // `eval` cannot return a value. Without this, "no password field",
+            // "no username field" and "clicked the button" were indistinguishable
+            // and the only observable symptom was a silent timeout.
+            if let Ok(u) = w.url() {
+                if let Some(f) = u.fragment() {
+                    if f.starts_with("WE_FILL:") {
+                        last_verdict = f.trim_start_matches("WE_FILL:").to_string();
+                    }
+                }
+            }
+            log::info!("[login-flow] fill attempt {submitted}: {last_verdict}");
             if !force && self.is_logged_in_inner() {
                 break;
             }
         }
+        log::info!(
+            "[login-flow] form fill attempted {submitted}x; last={last_verdict}; cookie_now={}",
+            self.is_logged_in_inner()
+        );
 
         // Poll for the auth cookie to arrive after submit. 40 × 1s gives the
         // user time to approve a Steam Guard prompt on their phone; the old
         // 25 × 800ms window (20s) expired before most people could react.
-        for _ in 0..40 {
+        let page_probe = build_page_probe_script();
+        let mut last_page = String::new();
+        for tick in 0..40 {
             sleep(Duration::from_millis(1000)).await;
+            // Sample the page state every few seconds: whatever Steam rendered
+            // after the submit is the only clue to *why* no cookie appeared.
+            if tick % 3 == 0 {
+                let _ = w.eval(page_probe);
+                sleep(Duration::from_millis(250)).await;
+                if let Ok(u) = w.url() {
+                    if let Some(f) = u.fragment() {
+                        if f.starts_with("WE_PAGE:") {
+                            let now = f.trim_start_matches("WE_PAGE:").to_string();
+                            if now != last_page {
+                                log::warn!("[login-flow] page after submit: {now}");
+                                last_page = now;
+                            }
+                        }
+                    }
+                }
+            }
             if self.is_logged_in_inner() {
                 // Navigate to a plain Workshop page so any further state
                 // (age-gate, community country) is picked up.
@@ -581,7 +720,60 @@ impl SteamWebview {
             }
         }
 
+        // The store-domain sign-in can succeed without ever producing a
+        // `steamcommunity.com` cookie. Visit a community page so Steam issues
+        // one, then re-check: this is the difference between "signed in" and
+        // "signed in, but every workshop request is anonymous".
+        log::warn!("[login-flow] no auth cookie after polling; trying community page");
+        self.ensure_community_session(&w).await;
+        let ok = self.is_logged_in_inner();
+        log::warn!("[login-flow] giving up: cookie_present={ok}");
+        if ok {
+            return Ok(true);
+        }
+
         Ok(false)
+    }
+
+    /// Make the webview hold a `steamcommunity.com` session.
+    ///
+    /// This is the crux of the whole login problem. `steamLoginSecure` — the
+    /// cookie every authenticated workshop request depends on — lives on the
+    /// `steamcommunity.com` domain. The login form, however, is served from
+    /// `store.steampowered.com` (that page is still server-rendered, whereas
+    /// the community login page became a React SPA that sometimes mounts
+    /// empty). Signing in on the store domain authenticates the account, but
+    /// WebView2 only materialises a domain's cookie jar once a page on that
+    /// domain has actually been visited. Without the navigation below the
+    /// community jar stayed empty, `is_logged_in_inner` never saw
+    /// `steamLoginSecure`, and the UI reported "login failed" after every
+    /// restart even though the credentials were fine.
+    ///
+    /// Visiting a community page after a successful sign-in makes Steam issue
+    /// the cookie for that domain. Harmless when already signed in.
+    async fn ensure_community_session(&self, w: &tauri::WebviewWindow) {
+        // Only ever worth one attempt per process.
+        //
+        // Without this guard every `steam_current_account` poll (the details
+        // panel asks constantly) re-ran the whole 12-second navigation+poll
+        // cycle, which filled the log with warnings and burned CPU for a
+        // session that was never coming back. If Steam did not hand out the
+        // cookie on the first visit, no amount of retrying will change that —
+        // the user has to sign in again.
+        if self
+            .community_attempted
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return;
+        }
+        let _ = w.eval(format!("window.location.href = {:?}", STEAM_HOME_URL));
+        for _ in 0..30 {
+            sleep(Duration::from_millis(400)).await;
+            if self.is_logged_in_inner() {
+                return;
+            }
+        }
+        log::warn!("[steam-webview] community session did not materialise");
     }
 
     fn is_logged_in_inner(&self) -> bool {
@@ -720,7 +912,10 @@ fn build_login_script(username: &str, password: &str) -> String {
                         pass = inputs[i]; break;
                     }}
                 }}
-                if (!pass) return {{ ready: false, why: 'no-password' }};
+                if (!pass) {{
+                    try {{ history.replaceState(null, '', location.pathname + location.search + '#WE_FILL:no-password'); }} catch (e) {{}}
+                    return {{ ready: false, why: 'no-password' }};
+                }}
 
                 // Username = the visible text input right before the password
                 // field in the same form, skipping search / auth-code boxes.
@@ -736,7 +931,10 @@ fn build_login_script(username: &str, password: &str) -> String {
                     if (!visible(c) || isSearch(c) || isCodeBox(c)) continue;
                     login = c; break;
                 }}
-                if (!login) return {{ ready: false, why: 'no-username' }};
+                if (!login) {{
+                    try {{ history.replaceState(null, '', location.pathname + location.search + '#WE_FILL:no-username'); }} catch (e) {{}}
+                    return {{ ready: false, why: 'no-username' }};
+                }}
 
                 setReactValue(login, "{user}");
                 setReactValue(pass, "{pass}");
@@ -760,13 +958,59 @@ fn build_login_script(username: &str, password: &str) -> String {
                     }}
                 }}
                 if (btn) {{ btn.disabled = false; btn.click(); }}
+                try {{
+                    history.replaceState(null, '', location.pathname + location.search
+                        + '#WE_FILL:ready,clicked=' + (btn ? 1 : 0));
+                }} catch (e) {{}}
                 return {{ ready: true, clicked: !!btn }};
             }} catch (e) {{
+                try {{
+                    history.replaceState(null, '', location.pathname + location.search
+                        + '#WE_FILL:error');
+                }} catch (e2) {{}}
                 return {{ error: String(e) }};
             }}
         }})();
         "#
     )
+}
+
+/// Classify whatever page the login flow ended up on.
+///
+/// This exists because the only observable symptom of a failed auto-login was
+/// "no cookie", which is indistinguishable between a wrong password, a Steam
+/// Guard prompt, a CAPTCHA and a rate-limit block. Each needs a completely
+/// different response from the user (and from us), so the page has to be
+/// inspected rather than guessed at. Only coarse keyword flags are reported —
+/// never page text, never form values.
+fn build_page_probe_script() -> &'static str {
+    r#"
+    (function() {
+        try {
+            var t = ((document.body && document.body.innerText) || '').toLowerCase();
+            var title = (document.title || '').toLowerCase();
+            var all = t + ' ' + title;
+            var flags = [];
+            if (all.indexOf('steam guard') >= 0 || all.indexOf('two-factor') >= 0
+                || all.indexOf('authenticator') >= 0 || all.indexOf('验证器') >= 0
+                || all.indexOf('安全令牌') >= 0) flags.push('GUARD');
+            if (all.indexOf('captcha') >= 0 || all.indexOf('验证码') >= 0
+                || all.indexOf('人机') >= 0) flags.push('CAPTCHA');
+            if (all.indexOf('incorrect') >= 0 || all.indexOf('wrong password') >= 0
+                || all.indexOf('密码错误') >= 0 || all.indexOf('密碼錯誤') >= 0
+                || all.indexOf('try again') >= 0) flags.push('BADPASS');
+            if (all.indexOf('too many') >= 0 || all.indexOf('rate limit') >= 0
+                || all.indexOf('频繁') >= 0) flags.push('RATELIMIT');
+            if (all.indexOf('sign in') >= 0 || all.indexOf('登录') >= 0
+                || all.indexOf('log in') >= 0) flags.push('LOGINPAGE');
+            if (location.pathname.indexOf('/login') < 0) flags.push('LEFTLOGIN');
+            try {
+                history.replaceState(null, '', location.pathname + location.search
+                    + '#WE_PAGE:' + (flags.length ? flags.join('+') : 'NONE'));
+            } catch (e) {}
+        } catch (e) {}
+    })();
+    "#
 }
 
 fn escape_js_string(s: &str) -> String {

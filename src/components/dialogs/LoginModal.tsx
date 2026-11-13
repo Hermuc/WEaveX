@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Lock, User, KeyRound } from "lucide-react";
 import { useTranslation } from "@/i18n/hooks";
-import { invoke, tryInvoke, tryInvokeAction } from "@/lib/tauri";
+import { invoke, tryInvoke, tryInvokeAction, tryInvokeOk } from "@/lib/tauri";
 import { pushToast } from "@/stores/toasts";
 import { useSteamSessionStore, SteamAccountInfo } from "@/stores/steam-session";
 import { useAppStore } from "@/stores/app";
@@ -17,6 +17,10 @@ export default function LoginModal({
 }) {
   const { t } = useTranslation();
   const [step, setStep] = useState<"credentials" | "2fa">("credentials");
+  // Which Steam Guard kinds the current challenge accepts ("device_code" /
+  // "email_code"), so the submit button can tell Steam the right type.
+  const [guardKinds, setGuardKinds] = useState<string[]>([]);
+  const [guardCode, setGuardCode] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,23 +89,53 @@ export default function LoginModal({
     });
   }, [open]);
 
+  /// Refresh the sidebar status from the authoritative probe.
+  ///
+  /// `unknown` (the network call failed) must leave the badge alone rather than
+  /// clearing it: treating a timeout as "signed out" is what made the status
+  /// flicker between signed-in and failed.
   const refreshSession = useCallback(async () => {
-    const v = await tryInvoke<boolean>("steam_is_logged_in", undefined, false);
-    if (!v) {
-      await tryInvoke("steam_current_account", undefined);
+    const probe = await tryInvoke<{
+      state: string;
+      account?: SteamAccountInfo;
+    }>("steam_probe_account", undefined, { state: "unknown" });
+
+    if (probe?.state === "signed_in") {
+      setSessionLoggedIn(probe.account ?? null);
+    } else if (probe?.state === "signed_out") {
       setSessionLoggedIn(null);
-      return;
     }
-    const info = await tryInvoke<SteamAccountInfo | null>(
-      "steam_current_account",
-      undefined,
-      null,
-    );
-    setSessionLoggedIn(info ?? null);
+    // `unknown`: keep whatever the sidebar already shows.
   }, [setSessionLoggedIn]);
 
   const finalizeLogin = useCallback(async () => {
     await invoke<number>("steam_sync_cookies").catch(() => 0);
+
+    // Persist the credentials we just signed in with.
+    //
+    // Without this the sign-in only ever lived in the WebView2 cookie jar, and
+    // `steamLoginSecure` is a *session* cookie — it dies with the process. The
+    // next launch had no stored account to auto-login with (`user_accounts.enc`
+    // still held whatever was saved days earlier, or nothing), so the app always
+    // reported "login failed" on startup even though the previous session had
+    // been perfectly fine.
+    //
+    // `accounts_set_custom` is idempotent: an existing entry is simply updated,
+    // so re-logging in with a new password refreshes it.
+    const user = username.trim();
+    const pass = password;
+    if (user && pass) {
+      const saved = await tryInvokeOk("accounts_set_custom", {
+        username: user,
+        password: pass,
+      });
+      if (!saved) {
+        // Non-fatal: the session in the webview is already valid. Only the
+        // auto-login-on-next-start convenience is lost.
+        console.warn("[login] could not persist credentials for", user);
+      }
+    }
+
     pushToast(
       t("messages.signed_in_to_steam") || "Signed in to Steam",
       "success",
@@ -113,18 +147,25 @@ export default function LoginModal({
     await refreshSession();
     triggerGlobalRefresh();
     onOpenChange(false);
-  }, [refreshSession, setAccounts, onOpenChange, t]);
+  }, [refreshSession, setAccounts, onOpenChange, t, username, password]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (open && isPrepared) {
       interval = setInterval(async () => {
-        const isLoggedIn = await tryInvoke<boolean>(
-          "steam_is_logged_in",
+        // Use the same three-state probe as the startup path.
+        //
+        // `steam_is_logged_in` only checks whether a `steamLoginSecure` cookie
+        // exists, so it can say yes while Steam has already invalidated the
+        // session — and the startup path can say no for the opposite reason.
+        // Mixing the two produced exactly the flip-flopping badge users saw:
+        // "signed in" and "login failed" alternating without any action.
+        const probe = await tryInvoke<{ state: string }>(
+          "steam_probe_account",
           undefined,
-          false,
+          { state: "unknown" },
         );
-        if (isLoggedIn) {
+        if (probe?.state === "signed_in") {
           clearInterval(interval);
           await finalizeLogin();
           return;
@@ -218,35 +259,30 @@ export default function LoginModal({
     }
   };
 
-  // We no longer try to drive Steam Guard ourselves. The only reliable path
-  // is: submit the credentials in the real Steam window, then let *Steam*
-  // handle the guard prompt. This poller simply waits for the session cookie
-  // that appears once the user has finished (up to 5 minutes).
-  const waitForLoginResult = async (maxAttempts = 300) => {
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const isLoggedIn = await tryInvoke<boolean>(
-        "steam_is_logged_in",
-        undefined,
-        false,
+
+  /// Submit a Steam Guard code typed by the user.
+  const handleGuardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guardCode.trim()) return;
+
+    setErrorMsg(null);
+    setBusy(true);
+    try {
+      await invoke<string>("steam_oauth_submit_guard", {
+        code: guardCode.trim(),
+        kind: guardKinds[0] ?? null,
+      });
+      await finalizeLogin();
+    } catch (e) {
+      const msg = String(e);
+      setErrorMsg(
+        msg.includes("INVALID_GUARD_CODE")
+          ? "That Steam Guard code was not accepted. Try again."
+          : msg,
       );
-      if (isLoggedIn) return "SUCCESS";
-      if (!busyRef.current) return "CANCELLED";
-      if (i >= 5) {
-        const polled = await tryInvoke<string | null>(
-          "steam_login_poll_error",
-          undefined,
-          null,
-        );
-        // Only a real credential error ends the wait; a Steam Guard screen is
-        // not an error and is handled in the Steam window by the user.
-        if (polled && polled.length > 20 && /密码|password|incorrect|invalid|verify|captcha|次数|尝试/i.test(polled)) {
-          setErrorMsg(polled);
-          return "ERROR";
-        }
-      }
+    } finally {
+      setBusy(false);
     }
-    return "FAILED";
   };
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
@@ -257,37 +293,38 @@ export default function LoginModal({
     setBusy(true);
     busyRef.current = true;
     try {
-      // Hand the credentials to Steam and open its real login window.
+      // Sign in through Steam's OAuth API rather than by filling the web form.
       //
-      // The backend shows the window first (WebView2 suspends scripts while
-      // hidden), drops any stale session, opens the credential form and
-      // *best-effort* prefills it. It returns true only when a session cookie
-      // already exists — i.e. no Steam Guard was needed.
-      const loggedIn = await invoke<boolean>("steam_login_fill", {
-        username,
-        password,
-      });
-      if (loggedIn) {
+      // Filling the form always ends at a Steam Guard page the headless webview
+      // cannot answer. The OAuth API instead *tells us* which guard Steam wants,
+      // so the user can type the code here and we submit it directly.
+      const res = await invoke<{
+        status: "approved" | "guard_code" | "mobile_confirm";
+        allowed_kinds: string[];
+        steam_id: string | null;
+      }>("steam_oauth_begin", { username, password });
+
+      if (res.status === "approved") {
         await finalizeLogin();
         return;
       }
-      // Steam Guard (mobile confirmation / email code / new device) is Steam's
-      // own flow. The window is already on screen — the user finishes there.
-      setStep("2fa");
-      const result = await waitForLoginResult(300);
-      if (result === "SUCCESS") {
-        await invoke("steam_login_hide").catch(() => undefined);
-        await finalizeLogin();
-      } else if (result === "ERROR") {
-        await invoke("steam_login_hide").catch(() => undefined);
-        setStep("credentials");
-      } else if (result === "FAILED") {
-        setErrorMsg(
-          "Timed out waiting for Steam. Finish signing in inside the Steam window and try again.",
-        );
+
+      if (res.status === "guard_code") {
+        // Ask the user for the code; `handleGuardSubmit` finishes the flow.
+        setGuardKinds(res.allowed_kinds);
+        setStep("2fa");
+        return;
       }
+
+      // mobile_confirm is resolved inside the command; anything else is a bug.
+      setErrorMsg("Unexpected Steam response. Try again.");
     } catch (e) {
-      setErrorMsg(String(e));
+      const msg = String(e);
+      setErrorMsg(
+        msg.includes("INVALID_PASSWORD")
+          ? "Incorrect username or password."
+          : msg,
+      );
     } finally {
       setBusy(false);
       busyRef.current = false;
@@ -431,50 +468,62 @@ export default function LoginModal({
                 )}
               </div>
             ) : (
-              <div className="flex flex-col gap-5 py-2">
+              <form onSubmit={handleGuardSubmit} className="flex flex-col gap-5 py-2">
                 {errorMsg && (
                   <div className="flex items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-500">
                     <p className="text-xs">{errorMsg}</p>
                   </div>
                 )}
 
-                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-primary/10 bg-primary/5 p-5 text-center">
-                  <span className="inline-block size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  <p className="text-sm font-medium">
-                    {t("settings.steam_window_title") ||
-                      "Steam 登录窗口已打开，请在其中完成登录"}
-                  </p>
-                  <p className="text-xs leading-relaxed text-muted">
-                    {t("settings.steam_window_help") ||
-                      "如果 Steam 要求手机确认、邮箱验证码或设备授权，请直接在那个窗口里操作。完成后本窗口会自动关闭。"}
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium">
+                    {guardKinds[0] === "email_code"
+                      ? "Steam 邮件验证码"
+                      : "Steam Guard 验证码"}
+                  </label>
+                  <input
+                    autoFocus
+                    className="input w-full text-center font-mono tracking-widest"
+                    placeholder={
+                      guardKinds[0] === "email_code" ? "ABCDE" : "ABCDE"
+                    }
+                    value={guardCode}
+                    onChange={(e) => setGuardCode(e.target.value.toUpperCase())}
+                    disabled={busy}
+                    maxLength={10}
+                  />
+                  <p className="text-[11px] leading-relaxed text-muted">
+                    {guardKinds[0] === "email_code"
+                      ? "Steam 已把验证码发到你的邮箱，请填入上面的输入框。"
+                      : "请打开 Steam 手机 App 的「Steam 令牌」，输入其中的验证码。"}
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex justify-end gap-2">
                   <button
                     type="button"
-                    className="btn-secondary w-full py-2 text-sm"
-                    onClick={async () => {
-                      await invoke("steam_login_reveal").catch(() => undefined);
-                    }}
-                  >
-                    {t("settings.show_steam_window") || "重新显示 Steam 窗口"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost w-full py-2 text-sm"
+                    className="btn-ghost"
                     onClick={() => {
-                      busyRef.current = false;
-                      void invoke("steam_login_hide").catch(() => undefined);
                       setStep("credentials");
                       setErrorMsg(null);
-                      setBusy(false);
+                      setGuardCode("");
                     }}
+                    disabled={busy}
                   >
-                    {t("buttons.cancel") || "取消"}
+                    {"返回"}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary flex items-center gap-2"
+                    disabled={busy || !guardCode.trim()}
+                  >
+                    {busy && (
+                      <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    )}
+                    {"验证"}
                   </button>
                 </div>
-              </div>
+              </form>
             )}
           </div>
         </Dialog.Content>

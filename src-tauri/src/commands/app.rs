@@ -174,6 +174,18 @@ pub fn app_restore_window_geometry(
 #[command]
 pub fn app_show_main_window(app: AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        // Guard against the degenerate size the platform applies when a window is
+        // shown before its configured dimensions take effect. Without this the app
+        // can end up as an 18x18 sliver that is technically "open" but invisible,
+        // which reads to the user as "the program will not start".
+        let healthy = window
+            .outer_size()
+            .map(|s| s.width >= 400 && s.height >= 300)
+            .unwrap_or(false);
+        if !healthy {
+            let _ = window.set_size(tauri::PhysicalSize::new(1200, 700));
+            let _ = window.center();
+        }
         let _ = window.show();
         let _ = window.set_focus();
     }
