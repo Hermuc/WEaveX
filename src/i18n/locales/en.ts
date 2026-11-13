@@ -66,6 +66,8 @@ export default {
     hide_icons: "Hide Desktop Icons",
     media_controls: "Media Controls",
     preset_settings: "Preset Settings",
+    preset_settings_inactive:
+      "Preset Settings (not on screen — changes are saved to project.json and apply next use)",
   },
   steam_status: {
     logging_in: "Signing Steam",

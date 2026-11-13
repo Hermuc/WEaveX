@@ -66,6 +66,8 @@ export default {
     hide_icons: "隐藏桌面图标",
     media_controls: "媒体控制",
     preset_settings: "预设设置",
+    preset_settings_inactive:
+      "预设设置（该壁纸当前未显示，修改会存入 project.json，下次使用时生效）",
   },
   steam_status: {
     logging_in: "正在登录 Steam",

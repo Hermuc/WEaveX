@@ -296,10 +296,13 @@ export default function DetailsActionButtons({
         {showInstalledActions && installedHandle && (
           <Tooltip
             content={
+              // Both keys exist in the locale files, so they are type-checked
+              // now: a typo here is a compile error instead of a raw key
+              // rendered into the tooltip (which is how
+              // `tooltips.preset_settings_inactive` leaked to users).
               isActive
-                ? (t as any)("tooltips.preset_settings") || "Preset Settings"
-                : (t as any)("tooltips.preset_settings_inactive") ||
-                  "Preset Settings (this wallpaper is not on screen — changes are saved to project.json and apply the next time you use it)"
+                ? t("tooltips.preset_settings")
+                : t("tooltips.preset_settings_inactive")
             }
             side="top"
           >
