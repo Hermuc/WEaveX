@@ -124,6 +124,13 @@ impl AppState {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
+                // Create the hidden Steam webview first. Every cookie/session
+                // read short-circuits to "logged out" when the window does
+                // not exist yet, and nothing used to create it at startup —
+                // so WebView2's persisted `steamLoginSecure` was never read
+                // and the user appeared signed out after every restart.
+                let restored = steam_webview.ensure_profile_loaded().await;
+                log::info!("[startup] steam session restored: {restored}");
                 let synced = match steam_webview.sync_cookies().await {
                     Ok(n) => {
                         if n > 0 {

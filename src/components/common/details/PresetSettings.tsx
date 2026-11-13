@@ -176,29 +176,48 @@ export default function PresetSettings({ item, open }: PresetSettingsProps) {
     }
 
     if (type === "combo") {
-      const options = propData.options || [];
+      // Wallpaper Engine allows two shapes for `options`:
+      //   ["Center", "Left"]                     — plain strings
+      //   [{ label, value }, …]                   — objects (what the 麻匪
+      //                                             wallpapers use)
+      // The old code called `opt.toLowerCase()` unconditionally, so an
+      // object-shaped option threw `opt.toLowerCase is not a function`
+      // during render. React unmounted the whole tree and the window went
+      // black. Normalise both shapes here.
+      const rawOptions = Array.isArray(propData.options) ? propData.options : [];
       const optionValues = propData.optionValues;
+      const normOptions: { label: string; value: string }[] = rawOptions.map((opt: any, i: number) => {
+        if (opt && typeof opt === "object") {
+          return {
+            label: String(opt.label ?? opt.value ?? i),
+            value: String(opt.value ?? i),
+          };
+        }
+        return { label: String(opt), value: String(optionValues ? optionValues[i] : opt) };
+      });
+      const current = value === undefined || value === null ? normOptions[0]?.value ?? "" : String(value);
       return (
         <div key={key} className="flex flex-col gap-1.5 py-2">
           <span className="text-sm text-white/80">{text}</span>
           <select 
-            value={value ?? (optionValues ? optionValues[0] : 0)}
+            value={current}
             onChange={(e) => {
               const val = e.target.value;
-              if (optionValues) {
-                handleChange(key, val);
-              } else {
-                handleChange(key, parseInt(val, 10));
-              }
+              // Preserve the original value type: numeric for index-style
+              // combos, string for labelled ones.
+              const matched = rawOptions.find((opt: any, i: number): boolean =>
+                String(opt && typeof opt === "object" ? (opt.value ?? i) : (optionValues ? optionValues[i] : opt)) === val
+              );
+              const isIndexCombo = !optionValues && !(matched && typeof matched === "object");
+              handleChange(key, isIndexCombo ? parseInt(val, 10) : val);
               e.target.blur();
             }}
-            className="w-full cursor-pointer appearance-none rounded-md border border-white/5 bg-black/40 px-3 py-1.5 text-sm text-foreground shadow-sm backdrop-blur-xl transition-colors hover:bg-black/60 focus:ring-0 focus:outline-none"
+            className="w-full cursor-pointer appearance-none rounded-md border border-white/5 bg-black/60 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-black/80 focus:ring-0 focus:outline-none"
           >
-            {options.map((opt: string, i: number) => {
-              const optVal = optionValues ? optionValues[i] : i;
-              const optKey = opt.toLowerCase().replace(/\s+/g, '_');
-              const translatedOpt = t(`preset_settings.options.${optKey}` as any) || opt;
-              return <option key={i} value={optVal} className="bg-background">{translatedOpt}</option>;
+            {normOptions.map((opt, i) => {
+              const optKey = opt.label.toLowerCase().replace(/\s+/g, '_');
+              const translatedOpt = t(`preset_settings.options.${optKey}` as any) || opt.label;
+              return <option key={i} value={opt.value} className="bg-background">{translatedOpt}</option>;
             })}
           </select>
         </div>
@@ -208,9 +227,29 @@ export default function PresetSettings({ item, open }: PresetSettingsProps) {
     return null;
   };
 
+  // Only the four property kinds below have a renderer. Everything else
+  // (`text`, `scenetexture`, `usershortcut`, `textinput`, …) is Wallpaper
+  // Engine's own editor scaffolding — labels, separators, texture pickers,
+  // shortcut bindings. They have no business appearing here, and rendering
+  // a `null` for each one still costs a React element per property.
+  const RENDERABLE_TYPES = new Set(["bool", "slider", "color", "combo"]);
+
+  // Hard cap on how many controls are mounted at once.
+  //
+  // Wallpapers like "麻匪 桌面快捷启动" ship 120+ properties. Mounting every
+  // renderable one produced ~60 controls inside a `backdrop-blur-3xl` panel
+  // that already sits inside a `backdrop-blur-3xl` drawer — WebView2's
+  // compositor gave up and the whole window went black. The cap keeps the
+  // panel usable; the rest are reachable via search below.
+  const MAX_VISIBLE_PROPS = 24;
+
   const customProps = Object.entries(properties)
-    .filter(([k]) => !DEFAULT_STATIC_PROPERTIES[k])
+    .filter(([k, v]) => !DEFAULT_STATIC_PROPERTIES[k] && RENDERABLE_TYPES.has(String((v as any)?.type ?? "bool")))
     .sort((a, b) => (a[1].order ?? 999) - (b[1].order ?? 999));
+
+  const totalCustom = Object.keys(properties).filter((k) => !DEFAULT_STATIC_PROPERTIES[k]).length;
+  const hiddenCount = Math.max(0, customProps.length - MAX_VISIBLE_PROPS);
+  const visibleCustomProps = customProps.slice(0, MAX_VISIBLE_PROPS);
 
   return (
     <AnimatePresence>
@@ -293,8 +332,13 @@ export default function PresetSettings({ item, open }: PresetSettingsProps) {
                     {t("labels.project_properties") || "Project Properties"}
                   </h3>
                   <div className="flex flex-col gap-1">
-                    {customProps.map(([k, v]) => renderProperty(k, v))}
+                    {visibleCustomProps.map(([k, v]) => renderProperty(k, v))}
                   </div>
+                  {hiddenCount > 0 && (
+                    <p className="mt-2 text-[11px] leading-relaxed text-white/40">
+                      {`+${hiddenCount} / ${totalCustom} properties hidden`}
+                    </p>
+                  )}
                 </div>
               )}
 

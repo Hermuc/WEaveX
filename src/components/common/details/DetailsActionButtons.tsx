@@ -85,14 +85,23 @@ export default function DetailsActionButtons({
 
   const [isActive, setIsActive] = useState(false);
 
+  // Depend on the id, not on the object: `installedHandle` is rebuilt on
+  // every render (the ternary hands back a fresh reference whenever the
+  // parent re-renders with a new object), so listing it as a dependency
+  // made `checkActive` — and therefore the polling `useEffect` below —
+  // tear down and re-create itself on every render. The interval never
+  // survived long enough to fire, so `isActive` stayed at its initial
+  // `false` and the preset-settings button was permanently disabled.
+  const activeTargetId = installedHandle?.pubfileid ?? null;
+
   const checkActive = useCallback(async () => {
-    if (!installedHandle || !inTauri) {
+    if (!activeTargetId || !inTauri) {
       setIsActive(false);
       return;
     }
     const activeIds = await tryInvoke<string[]>("we_active_pubfileids", undefined, []) || [];
-    setIsActive(activeIds.includes(installedHandle.pubfileid));
-  }, [installedHandle]);
+    setIsActive(activeIds.includes(activeTargetId));
+  }, [activeTargetId]);
 
   useEffect(() => {
     let cancelled = false;

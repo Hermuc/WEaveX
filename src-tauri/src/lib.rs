@@ -122,6 +122,7 @@ pub fn run() {
             commands::we::we_get_project_json,
             commands::we::we_open,
             commands::we::we_delete_wallpaper,
+            commands::we::we_delete_wallpapers_bulk,
             commands::we::we_save_project_properties,
             commands::we::we_restore_project_properties,
             commands::we::we_current_pubfileid,

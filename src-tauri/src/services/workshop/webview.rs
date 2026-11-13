@@ -78,11 +78,23 @@ impl SteamWebview {
         if self.app.get_webview_window(LABEL).is_some() {
             return Ok(false);
         }
+        Self::create_hidden_window(&self.app, &self.data_dir)?;
+        Ok(true)
+    }
+
+    /// Build the hidden Steam window. Safe to call only on the main thread.
+    fn create_hidden_window(
+        app: &tauri::AppHandle,
+        data_dir: &std::path::Path,
+    ) -> Result<(), tauri::Error> {
+        if app.get_webview_window(LABEL).is_some() {
+            return Ok(());
+        }
         log::warn!("[steam-webview] CREATING hidden window (this should happen once)");
         let url = WebviewUrl::External(STEAM_LOGIN_URL.parse().expect("valid url"));
-        WebviewWindowBuilder::new(&self.app, LABEL, url)
+        WebviewWindowBuilder::new(app, LABEL, url)
             .title("Steam")
-            .data_directory(self.data_dir.clone())
+            .data_directory(data_dir.to_path_buf())
             .visible(false)
             // No decorations and no shadow: this window is meant to be invisible
             // until the user opens the login dialog. With decorations enabled
@@ -96,7 +108,72 @@ impl SteamWebview {
             .inner_size(1000.0, 720.0)
             .resizable(true)
             .build()?;
-        Ok(true)
+        Ok(())
+    }
+
+    /// Make sure the hidden Steam webview exists, so the persisted WebView2
+    /// cookie jar is loaded from disk before anyone asks about the session.
+    ///
+    /// Why this exists: every read path (`sync_cookies`, `is_logged_in`,
+    /// `auto_login`) short-circuits to "no session" when the window has not
+    /// been created yet. The window used to be created lazily — only when the
+    /// user opened the login dialog — so on every launch the startup
+    /// `init_cookies` thread called `sync_cookies()` before any window
+    /// existed, got zero cookies back, and the UI reported "logged out"
+    /// even though WebView2 still held a perfectly valid `steamLoginSecure`
+    /// on disk. The user then had to log in again after every restart.
+    ///
+    /// WebView2 needs a moment after the window is created to rehydrate the
+    /// cookie store, so this polls until `steamLoginSecure` shows up (or the
+    /// budget runs out). Returns `true` when a session cookie was found.
+    pub async fn ensure_profile_loaded(&self) -> bool {
+        let _g = self.lock.lock().await;
+        // Create the window so WebView2 opens its persisted profile.
+        //
+        // This MUST happen on the main thread. `init_cookies` runs this on a
+        // worker thread, and creating a WebView2 there fails with
+        // HRESULT 0x80070057 ("parameter is incorrect") — the window never
+        // appears, no cookies load, and the session looks lost again.
+        // `run_on_main_thread` + a channel keeps the async flow correct.
+        // Only poll when we just built the window: WebView2 rehydrates the
+        // cookie jar from disk asynchronously right after creation. If the
+        // window already existed, its cookies are already loaded and the
+        // current state is authoritative — sleeping here would just add six
+        // seconds to every signed-out probe.
+        let freshly_created = if !self.window_exists() {
+            let app = self.app.clone();
+            let app_for_main = self.app.clone();
+            let data_dir = self.data_dir.clone();
+            let (tx, rx) = std::sync::mpsc::channel::<bool>();
+            let created = app.run_on_main_thread(move || {
+                let _ = tx.send(Self::create_hidden_window(&app_for_main, &data_dir).is_ok());
+            });
+            if created.is_err() {
+                log::warn!("[steam-webview] could not reach the main thread");
+                return false;
+            }
+            // Wait for the main thread to finish building the window.
+            match rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(true) => true,
+                _ => {
+                    log::warn!("[steam-webview] hidden window was not created at startup");
+                    return false;
+                }
+            }
+        } else {
+            false
+        };
+        if !freshly_created {
+            return self.is_logged_in_inner();
+        }
+        // Freshly created: give WebView2 up to ~6s (40 * 150ms) to rehydrate.
+        for _ in 0..40 {
+            if self.is_logged_in_inner() {
+                return true;
+            }
+            sleep(Duration::from_millis(150)).await;
+        }
+        false
     }
 
     /// Show the webview window so the user can interact with Steam's login

@@ -182,13 +182,18 @@ export function useWallpaperBulkActions({
       return;
     }
 
-    // Run parallel using Promise.all
-    const results = await Promise.all(
-      Array.from(toDelete).map((pubfileid) =>
-        tryInvokeAction("we_delete_wallpaper", { pubfileid }),
-      ),
+    // One bulk call, not N concurrent single deletes.
+    //
+    // `Promise.all` over `we_delete_wallpaper` used to fire a dozen
+    // simultaneous commands. Each re-read config.json, re-walked three
+    // directories and rewrote the whole metadata.json, which locked up the
+    // window. The backend now takes the whole list in one shot.
+    const failure = await tryInvokeAction<Array<[string, string]>>(
+      "we_delete_wallpapers_bulk",
+      { pubfileids: Array.from(toDelete) },
     );
-    const successCount = results.filter((r) => r.ok).length;
+    const failed = failure.ok ? (failure.value ?? []) : [];
+    const successCount = toDelete.size - failed.length;
 
     if (successCount > 0) {
       pushToast(
@@ -199,7 +204,9 @@ export function useWallpaperBulkActions({
       void refreshInstalledGlobal();
     } else {
       setItems(previousItems);
-      const errorMsg = results.find((r) => !r.ok)?.error || "Unknown error";
+      const errorMsg = failure.ok
+        ? failed[0]?.[1] ?? "Unknown error"
+        : failure.error;
       pushToast(describeDeleteError(errorMsg, t), "error");
     }
   };
@@ -228,15 +235,27 @@ export function useWallpaperBulkActions({
     const folder = await openPath({ directory: true });
     if (!folder || Array.isArray(folder)) return;
 
-    // Run parallel using Promise.all
-    const results = await Promise.all(
-      withPkg.map((item) =>
-        tryInvokeAction("extract_start", {
-          pubfileid: item.pubfileid,
-          outputDir: folder,
-        }),
-      ),
-    );
+    // Throttled, not unbounded.
+    //
+    // Each extract spawns a RepKG (.NET) process that reads a multi-hundred-
+    // megabyte .pkg and writes it back out. Firing one per selected wallpaper
+    // at once saturated the disk and starved the UI thread — selecting 20
+    // wallpapers could hang the window for minutes. Two at a time keeps the
+    // machine responsive while still finishing well ahead of serial.
+    const CONCURRENCY = 2;
+    const results: Awaited<ReturnType<typeof tryInvokeAction>>[] = [];
+    for (let i = 0; i < withPkg.length; i += CONCURRENCY) {
+      const chunk = withPkg.slice(i, i + CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map((item) =>
+          tryInvokeAction("extract_start", {
+            pubfileid: item.pubfileid,
+            outputDir: folder,
+          }),
+        ),
+      );
+      results.push(...chunkResults);
+    }
     const successCount = results.filter((r) => r.ok).length;
 
     if (successCount > 0) {

@@ -43,6 +43,11 @@ pub async fn steam_sync_cookies(state: AppStateHandle<'_>) -> Result<usize, Stri
 
 #[tauri::command]
 pub async fn steam_is_logged_in(state: AppStateHandle<'_>) -> Result<bool, String> {
+    // Same startup race as `steam_current_account`: `is_logged_in` reports
+    // `false` when the window does not exist yet, which is exactly the state
+    // during the first moments after launch. Ensure the profile is loaded
+    // first so the answer reflects the persisted session, not the timing.
+    state.steam_webview.ensure_profile_loaded().await;
     Ok(state.steam_webview.is_logged_in().await)
 }
 
@@ -56,6 +61,15 @@ pub async fn steam_is_logged_in(state: AppStateHandle<'_>) -> Result<bool, Strin
 pub async fn steam_current_account(
     state: AppStateHandle<'_>,
 ) -> Result<Option<SteamAccount>, String> {
+    // Make sure the webview exists BEFORE syncing.
+    //
+    // `sync_cookies` returns `Ok(0)` and does nothing when the hidden window
+    // has not been created yet — and at startup it is created on a background
+    // thread by `init_cookies`. The frontend's bootstrap probe fires at the
+    // same moment, so whichever won the race decided whether the user looked
+    // signed in. Waiting here (idempotent, and free once the window exists)
+    // makes the result deterministic instead of a coin flip.
+    state.steam_webview.ensure_profile_loaded().await;
     // Make sure whatever cookies are in the webview profile are
     // reflected in the reqwest jar before we query Steam.
     let _ = state.steam_webview.sync_cookies().await;

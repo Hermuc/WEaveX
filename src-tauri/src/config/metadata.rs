@@ -73,4 +73,37 @@ impl MetadataService {
     pub fn remove_item(&self, pubfileid: &str) {
         self.remove(pubfileid).ok();
     }
+
+    /// Write many entries with a single save.
+    ///
+    /// `set_item` rewrites the whole metadata.json every call, so a batch of
+    /// N deletions used to mean N full serializations of the entire store —
+    /// each one a `create_dir_all` + `to_string_pretty` + blocking `fs::write`
+    /// on whatever thread called it. Bulk delete now goes through this.
+    pub fn set_many(&self, entries: Vec<(String, Value)>) {
+        if entries.is_empty() {
+            return;
+        }
+        {
+            let mut guard = self.data.lock();
+            for (pubfileid, value) in entries {
+                set_value(&mut guard, &pubfileid, value);
+            }
+        }
+        self.save().ok();
+    }
+
+    /// Remove many entries with a single save (see `set_many`).
+    pub fn remove_many(&self, pubfileids: &[String]) {
+        if pubfileids.is_empty() {
+            return;
+        }
+        {
+            let mut guard = self.data.lock();
+            for pubfileid in pubfileids {
+                remove_value(&mut guard, pubfileid);
+            }
+        }
+        self.save().ok();
+    }
 }

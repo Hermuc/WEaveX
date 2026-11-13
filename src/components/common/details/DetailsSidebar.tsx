@@ -3,6 +3,7 @@ import { Languages, User } from "lucide-react";
 import { useTranslation } from "@/i18n/hooks";
 import { motion } from "framer-motion";
 import PresetSettings from "./PresetSettings";
+import ErrorBoundary from "@/components/common/ErrorBoundary";
 
 import Drawer from "@/components/common/Drawer";
 import PreviewImage from "@/components/common/PreviewImage";
@@ -153,10 +154,12 @@ export default function DetailsSidebar(props: DetailsSidebarProps) {
       onPreventedClose={() => setShowSettings(false)}
       asideContent={
         lastInstalled ? (
-          <PresetSettings 
-            open={showSettings}
-            item={lastInstalled} 
-          />
+          <ErrorBoundary label="PresetSettings">
+            <PresetSettings 
+              open={showSettings}
+              item={lastInstalled} 
+            />
+          </ErrorBoundary>
         ) : null
       }
     >

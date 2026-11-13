@@ -62,6 +62,14 @@ pub async fn batch_initialize_metadata(
 
     cancel.store(false, std::sync::atomic::Ordering::SeqCst);
 
+    // Accumulate results and flush once at the end.
+    //
+    // `set_item` rewrites the entire metadata.json per call, so feeding it
+    // one wallpaper at a time during a 25-item batch meant 25 full
+    // serializations plus 25 blocking fs writes — right while the UI is
+    // trying to animate the progress dialog.
+    let mut pending_writes: Vec<(String, Value)> = Vec::new();
+
     for (index, pubfileid) in pending.iter().enumerate() {
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             log::info!("Metadata initialization cancelled by user");
@@ -88,7 +96,7 @@ pub async fn batch_initialize_metadata(
                 })
                 .unwrap_or(Value::Null);
                 if !value.is_null() {
-                    metadata.read().set_item(&item.pubfileid, value);
+                    pending_writes.push((item.pubfileid, value));
                     count += 1;
                 }
             }
@@ -111,6 +119,9 @@ pub async fn batch_initialize_metadata(
         // Increased rate-limit delay to avoid 429 errors from Steam
         tokio::time::sleep(Duration::from_millis(800)).await;
     }
+
+    // One rewrite for the whole batch instead of one per wallpaper.
+    metadata.read().set_many(pending_writes);
     Ok(count)
 }
 

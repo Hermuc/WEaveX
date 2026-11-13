@@ -72,6 +72,38 @@ impl WallpaperEngineClient {
         self.directory.as_ref().map(|d| d.join("config.json"))
     }
 
+    /// Read `selectedwallpapers` out of Wallpaper Engine's config.json.
+    ///
+    /// The object is nested under a per-user key whose name is the Windows
+    /// account that last saved the config (e.g. `"An1"`), not a fixed
+    /// `"Main"`. Hard-coding `Main` made every lookup return `None` on any
+    /// machine whose user is not literally called `Main`, which silently
+    /// disabled the preset-settings button and the delete guard.
+    ///
+    /// Some builds also keep the block under a top-level `"Main"` key, so
+    /// that spelling is still accepted.
+    fn selected_wallpapers(
+        value: &serde_json::Value,
+    ) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        let root = value.as_object()?;
+        let mut candidates: Vec<&serde_json::Value> = Vec::new();
+        if let Some(main) = root.get("Main") {
+            candidates.push(main);
+        }
+        for (key, entry) in root {
+            if key != "Main" && entry.get("general").is_some() {
+                candidates.push(entry);
+            }
+        }
+        candidates.into_iter().find_map(|entry| {
+            entry
+                .get("general")?
+                .get("wallpaperconfig")?
+                .get("selectedwallpapers")?
+                .as_object()
+        })
+    }
+
     pub fn projects_path(&self) -> Option<PathBuf> {
         self.directory
             .as_ref()
@@ -281,10 +313,9 @@ impl WallpaperEngineClient {
         let config_path = self.config_path()?;
         let raw = std::fs::read_to_string(&config_path).ok()?;
         let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-        let selected = value
-            .pointer(&format!(
-                "/Main/general/wallpaperconfig/selectedwallpapers/Monitor{monitor}/file"
-            ))?
+        let selected = Self::selected_wallpapers(&value)?
+            .get(&format!("Monitor{monitor}"))?
+            .get("file")?
             .as_str()?
             .to_string();
         Path::new(&selected)
@@ -306,10 +337,7 @@ impl WallpaperEngineClient {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
             return Vec::new();
         };
-        let Some(selected) = value
-            .pointer("/Main/general/wallpaperconfig/selectedwallpapers")
-            .and_then(|v| v.as_object())
-        else {
+        let Some(selected) = Self::selected_wallpapers(&value) else {
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -850,6 +878,59 @@ pub fn delete_wallpaper_folder(projects_path: &Path, pubfileid: &str) -> anyhow:
 
 #[cfg(test)]
 mod tests {
+    /// Regression: Wallpaper Engine nests the config under the Windows
+    /// account name ("An1", "Main", …). The original code hard-coded
+    /// `Main`, so on every other machine `selectedwallpapers` resolved to
+    /// None, `isActive` stayed false, and the preset-settings button was
+    /// permanently greyed out.
+    #[test]
+    fn selected_wallpapers_reads_the_per_user_key() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{
+                "?installdirectory": "D:/Game/_Steam/steamapps/common/wallpaper_engine",
+                "An1": {
+                    "general": {
+                        "wallpaperconfig": {
+                            "selectedwallpapers": {
+                                "Monitor0": { "file": "d:/game/x/2858284176/ingame.mp4" }
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let selected =
+            WallpaperEngineClient::selected_wallpapers(&value).expect("per-user key must be found");
+        assert_eq!(
+            selected["Monitor0"]["file"].as_str(),
+            Some("d:/game/x/2858284176/ingame.mp4")
+        );
+    }
+
+    /// Some builds do spell the key `Main`; that must keep working.
+    #[test]
+    fn selected_wallpapers_still_accepts_main() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{
+                "Main": {
+                    "general": {
+                        "wallpaperconfig": {
+                            "selectedwallpapers": {
+                                "Monitor0": { "file": "d:/game/y/111/scene.pkg" }
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let selected = WallpaperEngineClient::selected_wallpapers(&value)
+            .expect("Main key must still be accepted");
+        assert!(selected.contains_key("Monitor0"));
+    }
     /// Regression: the Age Rating filter reads content_rating, so every scanned
     /// wallpaper must resolve to a known rating (project.json value, or the
     /// "Everyone" default applied to Wallpaper Engine's bundled samples).
