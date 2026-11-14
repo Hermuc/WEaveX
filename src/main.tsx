@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "@/App";
 import "@/index.css";
-import "@/i18n";
+import { INITIAL_LANGUAGE } from "@/i18n";
 import { THEME_CODES } from "@/hooks/useTheme";
 
 // Apply the persisted theme class before React mounts so that the very first
@@ -19,6 +19,12 @@ if (theme === "light") html.classList.remove("dark");
 else html.classList.add("dark");
 html.dataset.theme = theme;
 
+// Mirror the language i18next picked onto <html lang> for the first paint.
+// i18next itself is already initialised with the right language (see
+// `@/i18n`); this only keeps the document attribute in sync so assistive
+// technology and the browser's own text handling agree with the UI.
+html.lang = INITIAL_LANGUAGE;
+
 // Apply no-select class to body only in production builds
 if (import.meta.env.PROD) {
   document.body.classList.add("no-select");
@@ -29,3 +35,4 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
