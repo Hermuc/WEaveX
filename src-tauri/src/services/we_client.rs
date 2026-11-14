@@ -211,19 +211,45 @@ impl WallpaperEngineClient {
                 return hit.clone();
             }
         }
-        let scanned = self.scan_installed_wallpapers();
-        if let Ok(mut guard) = self.installed_cache.lock() {
-            *guard = Some(scanned.clone());
-        }
+        let scanned = Self::scan_installed_from(self.scan_directories());
+        self.store_installed(scanned.clone());
         scanned
     }
 
-    /// The uncached disk walk.
-    fn scan_installed_wallpapers(&self) -> Vec<InstalledWallpaper> {
+    /// The directory list to scan, in priority order.
+    ///
+    /// This is the ONLY part of an installed scan that needs the client lock:
+    /// it reads `self.directory`. Everything the actual scan does is disk I/O
+    /// and must happen with no lock held — see `scan_installed_from`.
+    pub fn scan_targets(&self) -> Vec<(PathBuf, &'static str)> {
+        self.scan_directories()
+    }
+
+    /// Replace the cached scan result.
+    ///
+    /// Holds the cache mutex for a single assignment, never across I/O. The
+    /// cache lives behind its own `std::sync::Mutex`, which is independent of
+    /// the `RwLock` the rest of `AppState` uses, so this cannot contend with
+    /// the synchronous `we_*` commands that run on the main thread.
+    pub fn store_installed(&self, items: Vec<InstalledWallpaper>) {
+        if let Ok(mut guard) = self.installed_cache.lock() {
+            *guard = Some(items);
+        }
+    }
+
+    /// Walk the given directories and build the installed list.
+    ///
+    /// Deliberately an associated function taking no `&self`: callers cannot
+    /// accidentally hold the client's RwLock across a disk scan. The old shape
+    /// (`let guard = client.read(); guard.installed_wallpapers()`) kept a read
+    /// lock for the whole walk, which blocked the 14 synchronous `we_*`
+    /// commands that run on the main thread — the window then could not repaint
+    /// and DWM composited the transparent frame instead.
+    pub fn scan_installed_from(targets: Vec<(PathBuf, &'static str)>) -> Vec<InstalledWallpaper> {
         let mut out: Vec<InstalledWallpaper> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for (dir, source) in self.scan_directories() {
+        for (dir, source) in targets {
             if !dir.is_dir() {
                 continue;
             }
@@ -676,36 +702,38 @@ fn steam_install_dirs() -> Vec<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn read_steam_install_path_from_registry() -> Option<PathBuf> {
-    // Avoid an extra `winreg` dep — shell out to `reg query`. Output is
-    // a few lines like:
-    //     HKEY_CURRENT_USER\Software\Valve\Steam
-    //         SteamPath    REG_SZ    C:\Program Files (x86)\Steam
-    let try_query = |hive: &str| -> Option<PathBuf> {
-        let out = std::process::Command::new("reg")
-            .args(["query", hive, "/v", "SteamPath"])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
+    use winreg::RegKey;
+
+    // Same lookup order the old `reg query` version used: the per-user install
+    // first (Steam's own default), then the two machine-wide views.
+    //
+    // Reading the registry through the API instead of spawning `reg.exe`
+    // matters: creating a process makes Windows take the loader lock, which
+    // briefly suspends *every* thread in the parent — including the one
+    // painting the window. That is the documented cause of the translucent
+    // rectangle that flashed when the Installed view did its first disk scan.
+    // `HKEY` is a raw handle (`*mut c_void`), not an integer. Spelling the
+    // type out avoids depending on winreg's internal alias.
+    const CANDIDATES: [(winreg::HKEY, &str); 3] = [
+        (HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+    ];
+
+    for (hive, subkey) in CANDIDATES {
+        let Ok(key) = RegKey::predef(hive).open_subkey_with_flags(subkey, KEY_READ) else {
+            continue;
+        };
+        let Ok(path) = key.get_value::<String, _>("SteamPath") else {
+            continue;
+        };
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed.replace('/', "\\")));
         }
-        let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("SteamPath") {
-                let rest = rest.trim_start();
-                if let Some(rest) = rest.strip_prefix("REG_SZ") {
-                    let p = rest.trim();
-                    if !p.is_empty() {
-                        return Some(PathBuf::from(p.replace('/', "\\")));
-                    }
-                }
-            }
-        }
-        None
-    };
-    try_query(r"HKCU\Software\Valve\Steam")
-        .or_else(|| try_query(r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam"))
-        .or_else(|| try_query(r"HKLM\SOFTWARE\Valve\Steam"))
+    }
+    None
 }
 
 /// Parse `<steam>/steamapps/libraryfolders.vdf`. Returns every library
@@ -763,19 +791,31 @@ fn steam_library_folders(steam_root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Total size of every file under `path`, capped at `max_depth` levels.
+///
+/// Wallpaper Engine projects are flat or one level deep; the cap only guards
+/// against pathological trees (a project folder pointed at a huge nested
+/// directory) turning a view switch into an unbounded walk. Depth is counted
+/// from `path` itself, so 8 levels comfortably covers every real project.
 fn walk_size(path: &Path, total: &mut u64) {
+    walk_size_bounded(path, total, 0, 8);
+}
+
+fn walk_size_bounded(path: &Path, total: &mut u64, depth: usize, max_depth: usize) {
+    if depth > max_depth {
+        return;
+    }
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_dir() {
-                walk_size(&p, total);
+                walk_size_bounded(&p, total, depth + 1, max_depth);
             } else if let Ok(meta) = entry.metadata() {
                 *total = total.saturating_add(meta.len());
             }
         }
     }
 }
-
 #[cfg(windows)]
 fn spawn_detached(mut cmd: Command) -> anyhow::Result<()> {
     use std::os::windows::process::CommandExt;
@@ -983,5 +1023,66 @@ mod tests {
         );
         assert!(wallpaper.has_pkg);
         assert!(wallpaper.preview.contains("preview.jpg"));
+    }
+
+    /// `scan_installed_from` must be a plain associated function: if it took
+    /// `&self`, a caller holding the client's RwLock would keep it held for the
+    /// whole 30 GB walk, blocking the synchronous `we_*` commands on the main
+    /// thread. This test simply calls it without ever building a client.
+    #[test]
+    fn scan_installed_from_needs_no_client() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let project = root.join("2858284176");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("project.json"),
+            r#"{"title":"Scanned Without A Lock","type":"video"}"#,
+        )
+        .unwrap();
+
+        let targets: Vec<(PathBuf, &'static str)> = vec![(root.to_path_buf(), SOURCE_MY_PROJECTS)];
+        let scanned = WallpaperEngineClient::scan_installed_from(targets);
+
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].pubfileid, "2858284176");
+        assert_eq!(scanned[0].title, "Scanned Without A Lock");
+        assert_eq!(scanned[0].source, SOURCE_MY_PROJECTS);
+    }
+
+    /// The depth cap must not change sizes for ordinary projects: a normal
+    /// wallpaper is one or two levels deep and must still report its exact
+    /// byte count, because the UI sorts and totals by `size_bytes`.
+    #[test]
+    fn walk_size_counts_a_normal_project_exactly() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("a.bin"), vec![0u8; 100]).unwrap();
+        fs::write(root.join("sub").join("b.bin"), vec![0u8; 250]).unwrap();
+
+        let mut total = 0u64;
+        walk_size(root, &mut total);
+        assert_eq!(total, 350);
+    }
+
+    /// Pathological nesting is cut off at the cap so a view switch cannot turn
+    /// into an unbounded walk. Files past the cap are simply not counted.
+    #[test]
+    fn walk_size_stops_at_the_depth_cap() {
+        let dir = tempdir().unwrap();
+        let mut deep = dir.path().to_path_buf();
+        for i in 0..12 {
+            deep = deep.join(format!("d{i}"));
+        }
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("deep.bin"), vec![0u8; 4096]).unwrap();
+        fs::write(dir.path().join("shallow.bin"), vec![0u8; 7]).unwrap();
+
+        let mut total = 0u64;
+        walk_size(dir.path(), &mut total);
+        // The shallow file is always counted; the 4 KiB file sitting 12 levels
+        // down is past the 8-level cap and must be excluded.
+        assert_eq!(total, 7);
     }
 }

@@ -134,16 +134,26 @@ export function useBootstrap() {
       // settles. Kept fire-and-forget so it never blocks the rest of boot.
       void syncSteamSession();
 
-      // Disabled for the bisect: the dotnet probe spawns a child process
-      // (which stalls the parent on Windows) and the installed scan is heavy.
-      // void maybeCheckForUpdates();
-      // if (!dotnetInitialized.current) {
-      //   dotnetInitialized.current = true;
-      //   void invoke("dotnet_init").catch(() => undefined);
-      //   void invoke("plugins_init").catch(() => undefined);
-      // }
-      // void registerWindowStatePersistence();
-      // void useInstalledStore.getState().refresh();
+      // Startup work that is deliberately fire-and-forget. All of it lands
+      // after `app_show_main_window` above, and every call is async on the Rust
+      // side, so none of it can stall the first paint.
+      //
+      // This block was commented out during the transparent-flash bisect and
+      // never restored. Leaving it out kept `useInstalledStore.ready` at
+      // `false` forever, so the Installed view never hit its cache and re-ran
+      // a full disk scan on every visit — the cold first scan is what let the
+      // compositor show the window's translucent frame.
+      void maybeCheckForUpdates();
+      if (!dotnetInitialized.current) {
+        dotnetInitialized.current = true;
+        // `dotnet_init` no longer spawns a child process: it probes the file
+        // system directly (see core/runtime.rs). Spawning one used to suspend
+        // every thread on the main thread while Windows took the loader lock.
+        void invoke("dotnet_init").catch(() => undefined);
+        void invoke("plugins_init").catch(() => undefined);
+      }
+      void registerWindowStatePersistence();
+      void useInstalledStore.getState().refresh();
 
       await Promise.all([
         listen<{

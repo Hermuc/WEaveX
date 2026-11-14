@@ -6675,6 +6675,7 @@ dependencies = [
  "unrar",
  "url",
  "urlencoding",
+ "winreg",
  "zip",
 ]
 

@@ -37,16 +37,31 @@ pub async fn we_list_installed(
     state: AppStateHandle<'_>,
     force: Option<bool>,
 ) -> Result<Vec<InstalledWallpaper>, String> {
-    // Clone the Arc so the worker owns it; the RwLock guard must not cross an
-    // await point.
     let client = state.we_client.clone();
     let force = force.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
-        let guard = client.read();
-        if force {
-            guard.invalidate_installed();
-        }
-        guard.installed_wallpapers()
+        // Copy the scan targets under a short-lived lock, then release it
+        // BEFORE touching the disk.
+        //
+        // The explicit `let` + block is essential: a temporary guard in
+        // `client.read().foo()` lives until the end of the *statement*, which
+        // silently keeps the lock held for the whole scan. That exact mistake
+        // once turned a fix into a regression where every view switch flashed.
+        let targets = {
+            let guard = client.read();
+            if force {
+                guard.invalidate_installed();
+            }
+            guard.scan_targets()
+        };
+
+        // Lock-free disk walk. Holds no lock, so the synchronous `we_*`
+        // commands that run on the main thread are never blocked by a scan.
+        let scanned = WallpaperEngineClient::scan_installed_from(targets);
+
+        // Short lock to publish the result.
+        client.read().store_installed(scanned.clone());
+        scanned
     })
     .await
     .map_err(|e| e.to_string())
