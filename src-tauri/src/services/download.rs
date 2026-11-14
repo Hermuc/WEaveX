@@ -32,6 +32,145 @@ fn is_steam_guard_prompt(line: &str) -> bool {
         || lower.contains("auth code sent to your email")
 }
 
+
+/// Build the `DepotDownloaderMod` command for one download attempt.
+///
+/// Kept separate from the retry loop so the argument list (and the Windows
+/// console-window flag) is defined once, and so `start` reads as orchestration
+/// rather than a wall of `cmd.args([...])`.
+fn build_depot_cmd(
+    plugin_path: &std::path::Path,
+    pubfileid: &str,
+    username: &str,
+    password: &str,
+    output_dir: &str,
+    dotnet_root: Option<&std::path::PathBuf>,
+) -> Command {
+    let login_id: u32 = rand::random();
+    let mut cmd = Command::new(plugin_path);
+    cmd.args([
+        "-app",
+        STEAM_APP_ID,
+        "-pubfile",
+        pubfileid,
+        "-verify-all",
+        "-username",
+        username,
+        "-password",
+        password,
+        "-remember-password",
+        "-loginid",
+        &login_id.to_string(),
+        "-max-downloads",
+        "32",
+        "-dir",
+    ])
+    .arg(output_dir)
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
+
+    if let Some(root) = dotnet_root {
+        cmd.env("DOTNET_ROOT", root);
+    }
+
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(crate::core::platform::CREATE_NO_WINDOW);
+    }
+
+    cmd
+}
+
+
+/// Emit a terminal status for one task and its matching `download://completed`
+/// event.
+///
+/// The cancel, success and fail paths each built a `TaskStatus` and then the
+/// same `DownloadCompleted` event, differing only in phase/text/success. One
+/// helper keeps the two events in lockstep — a caller that forgot the second
+/// emit would leave the frontend waiting forever.
+fn emit_terminal(
+    app: &AppHandle,
+    pubfileid: &str,
+    account: &str,
+    status: String,
+    phase: Phase,
+    progress: Option<f32>,
+    success: bool,
+) {
+    let final_status = TaskStatus {
+        pubfileid: pubfileid.to_string(),
+        status,
+        account: account.to_string(),
+        phase,
+        progress,
+    };
+    app.emit("download://status", &final_status).ok();
+    app.emit(
+        "download://completed",
+        DownloadCompleted {
+            pubfileid: pubfileid.to_string(),
+            success,
+        },
+    )
+    .ok();
+}
+
+
+/// What a single DepotDownloader stdout line tells us about the run.
+pub struct LineVerdict {
+    /// Percentage parsed from the line, if any (clamped to 0..=100).
+    pub progress: Option<f32>,
+    /// The line proves the handshake succeeded / a transfer started, so the
+    /// short "connecting" timeout no longer applies.
+    pub marks_started: bool,
+    /// The line is a code-entry prompt (email or authenticator app).
+    pub needs_code: bool,
+    /// The line is a mobile-app confirmation prompt.
+    pub needs_app_confirm: bool,
+    /// The line as reported to the UI, with the download directory replaced by
+    /// ": " so status text is not a full absolute path.
+    pub cleaned: String,
+}
+
+/// Classify one `OUT:` line from DepotDownloader.
+///
+/// Pure: no I/O and no state. Extracted from `start` so the keyword rules that
+/// decide "did this line start the transfer?" / "is this a 2FA prompt?" can be
+/// unit-tested without spawning a process.
+pub fn classify_progress_line(line: &str, output_dir: &str) -> LineVerdict {
+    let cleaned = line
+        .replace(&format!("{}\\", output_dir), ": ")
+        .replace(&format!("{}/", output_dir), ": ");
+    let progress = PROGRESS_RE
+        .captures(&cleaned)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().replace(',', ".").parse::<f32>().ok())
+        .map(|p| p.clamp(0.0, 100.0));
+
+    let lower = cleaned.to_lowercase();
+    let started_keyword = lower.contains("logged on")
+        || lower.contains("logged in")
+        || lower.contains("got appinfo")
+        || lower.contains("got depot key")
+        || lower.contains("downloading");
+    let needs_code = (lower.contains("enter") && lower.contains("code"))
+        || lower.contains("auth code")
+        || lower.contains("2 factor")
+        || lower.contains("authenticator app");
+    let needs_app_confirm = lower.contains("waiting for steam guard app confirmation");
+
+    LineVerdict {
+        progress,
+        marks_started: progress.is_some() || started_keyword || needs_code || needs_app_confirm,
+        needs_code,
+        needs_app_confirm,
+        cleaned,
+    }
+}
+
 static PROGRESS_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(\d{1,3}(?:[.,]\d+)?)\s*%").expect("progress regex"));
 
@@ -160,39 +299,14 @@ impl DownloadManager {
                 tasks.lock().insert(pubfileid.clone(), status.clone());
                 app.emit("download://status", &status).ok();
 
-                let mut cmd = Command::new(&plugin_path_owned);
-                let login_id: u32 = rand::random();
-                cmd.args([
-                    "-app",
-                    STEAM_APP_ID,
-                    "-pubfile",
+                let mut cmd = build_depot_cmd(
+                    &plugin_path_owned,
                     &pubfileid,
-                    "-verify-all",
-                    "-username",
                     &credentials.username,
-                    "-password",
                     &credentials.password,
-                    "-remember-password",
-                    "-loginid",
-                    &login_id.to_string(),
-                    "-max-downloads",
-                    "32",
-                    "-dir",
-                ])
-                .arg(&output_dir_string)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-
-                if let Some(ref root) = dotnet_root {
-                    cmd.env("DOTNET_ROOT", root);
-                }
-
-                #[cfg(windows)]
-                {
-                    cmd.creation_flags(crate::core::platform::CREATE_NO_WINDOW);
-                }
+                    &output_dir_string,
+                    dotnet_root.as_ref(),
+                );
 
                 let mut child = match cmd.spawn() {
                     Ok(c) => c,
@@ -232,7 +346,7 @@ impl DownloadManager {
                     ));
                 }
 
-                                drop(tx);
+                drop(tx);
 
                 let mut stderr_tail: Vec<String> = Vec::new();
                 let mut connection_failed = false;
@@ -275,51 +389,22 @@ impl DownloadManager {
                             // Any line at all means the child is alive; reset the
                             // idle clock so a slow-but-progressing run is not killed.
                             last_activity = tokio::time::Instant::now();
-                            if let Some(line) = msg.strip_prefix("OUT:") {
-                                let cleaned = line
-                                    .replace(&format!("{}\\", output_dir_string), ": ")
-                                    .replace(&format!("{}/", output_dir_string), ": ");
-                                let progress = PROGRESS_RE
-                                    .captures(&cleaned)
-                                    .and_then(|c| c.get(1))
-                                    .and_then(|m| m.as_str().replace(',', ".").parse::<f32>().ok())
-                                    .map(|p| p.clamp(0.0, 100.0));
-
-                                if progress.is_some() {
+                                                        if let Some(line) = msg.strip_prefix("OUT:") {
+                                let v = classify_progress_line(line, &output_dir_string);
+                                if v.marks_started {
                                     download_started = true;
                                 }
-
-                                let lower = cleaned.to_lowercase();
-                                // Reaching the login/app-info stage means the
-                                // handshake worked. Treat it as started so the
-                                // short connect budget no longer applies.
-                                if lower.contains("logged on")
-                                    || lower.contains("logged in")
-                                    || lower.contains("got appinfo")
-                                    || lower.contains("got depot key")
-                                    || lower.contains("downloading")
-                                {
-                                    download_started = true;
-                                }
-                                if (lower.contains("enter") && lower.contains("code"))
-                                    || lower.contains("auth code")
-                                    || lower.contains("2 factor")
-                                    || lower.contains("authenticator app")
-                                {
-                                    download_started = true; // prevent timeout
+                                if v.needs_code {
                                     app.emit("download://require_2fa", pubfileid.clone()).ok();
-                                } else if lower.contains("waiting for steam guard app confirmation")
-                                {
-                                    download_started = true; // prevent timeout
-                                    app.emit("download://require_app_confirm", pubfileid.clone())
-                                        .ok();
+                                } else if v.needs_app_confirm {
+                                    app.emit("download://require_app_confirm", pubfileid.clone()).ok();
                                 }
                                 let status = TaskStatus {
                                     pubfileid: pubfileid.clone(),
-                                    status: cleaned,
+                                    status: v.cleaned,
                                     account: username.clone(),
                                     phase: Phase::Running,
-                                    progress,
+                                    progress: v.progress,
                                 };
                                 tasks.lock().insert(pubfileid.clone(), status.clone());
                                 app.emit("download://status", &status).ok();
@@ -362,22 +447,15 @@ impl DownloadManager {
                 }
 
                 if was_cancelled {
-                    let final_status = TaskStatus {
-                        pubfileid: pubfileid.clone(),
-                        status: "Cancelled".to_string(),
-                        account: username,
-                        phase: Phase::Cancelled,
-                        progress: None,
-                    };
-                    app.emit("download://status", &final_status).ok();
-                    app.emit(
-                        "download://completed",
-                        DownloadCompleted {
-                            pubfileid: pubfileid.clone(),
-                            success: false,
-                        },
-                    )
-                    .ok();
+                    emit_terminal(
+                        &app,
+                        &pubfileid,
+                        &username,
+                        "Cancelled".to_string(),
+                        Phase::Cancelled,
+                        None,
+                        false,
+                    );
                     cancelled.lock().remove(&pubfileid);
                     tasks.lock().remove(&pubfileid);
                     return;
@@ -388,22 +466,15 @@ impl DownloadManager {
                 let success = (exit_ok || has_output) && !connection_failed;
 
                 if success {
-                    let final_status = TaskStatus {
-                        pubfileid: pubfileid.clone(),
-                        status: "Completed".to_string(),
-                        account: username,
-                        phase: Phase::Completed,
-                        progress: Some(100.0),
-                    };
-                    app.emit("download://status", &final_status).ok();
-                    app.emit(
-                        "download://completed",
-                        DownloadCompleted {
-                            pubfileid: pubfileid.clone(),
-                            success: true,
-                        },
-                    )
-                    .ok();
+                    emit_terminal(
+                        &app,
+                        &pubfileid,
+                        &username,
+                        "Completed".to_string(),
+                        Phase::Completed,
+                        Some(100.0),
+                        true,
+                    );
                     tasks.lock().remove(&pubfileid);
                     return;
                 }
@@ -421,22 +492,15 @@ impl DownloadManager {
                     } else {
                         "Failed".to_string()
                     };
-                    let final_status = TaskStatus {
-                        pubfileid: pubfileid.clone(),
-                        status: status_text,
-                        account: username,
-                        phase: Phase::Failed,
-                        progress: None,
-                    };
-                    app.emit("download://status", &final_status).ok();
-                    app.emit(
-                        "download://completed",
-                        DownloadCompleted {
-                            pubfileid: pubfileid.clone(),
-                            success: false,
-                        },
-                    )
-                    .ok();
+                    emit_terminal(
+                        &app,
+                        &pubfileid,
+                        &username,
+                        status_text,
+                        Phase::Failed,
+                        None,
+                        false,
+                    );
                     // Leave nothing behind: an empty folder still shows up in
                     // the Installed view as a broken entry with no project.json.
                     // Only clean up when the download produced no usable files,
@@ -527,5 +591,65 @@ impl DownloadManager {
 
     fn emit_status(&self, status: &TaskStatus) {
         self.app.emit("download://status", status).ok();
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_a_percentage_and_marks_started() {
+        let v = classify_progress_line("Downloading 42,5% (10 of 24)", "/out");
+        assert_eq!(v.progress, Some(42.5));
+        assert!(v.marks_started);
+        assert!(!v.needs_code);
+    }
+
+    #[test]
+    fn recognises_the_login_stage_as_started() {
+        // "Got appinfo" means the handshake worked, even with no percentage.
+        let v = classify_progress_line("Got appinfo for depot 431960", "/out");
+        assert_eq!(v.progress, None);
+        assert!(v.marks_started);
+    }
+
+    #[test]
+    fn flags_a_code_prompt() {
+        let v = classify_progress_line("Please enter the auth code sent to your email", "/out");
+        assert!(v.needs_code);
+        assert!(v.marks_started);
+        assert!(!v.needs_app_confirm);
+    }
+
+    #[test]
+    fn flags_a_mobile_confirm_prompt() {
+        let v = classify_progress_line("Waiting for Steam Guard app confirmation", "/out");
+        assert!(v.needs_app_confirm);
+        assert!(v.marks_started);
+        assert!(!v.needs_code);
+    }
+
+    #[test]
+    fn strips_the_output_directory_from_the_status_text() {
+        let v = classify_progress_line(
+            "C:/projects/myprojects/123/scene.pkg 50%",
+            "C:/projects/myprojects/123",
+        );
+        assert!(v.cleaned.starts_with(": "));
+        assert_eq!(v.progress, Some(50.0));
+    }
+
+    #[test]
+    fn clamps_an_out_of_range_percentage() {
+        assert_eq!(classify_progress_line("250%", "/o").progress, Some(100.0));
+    }
+
+    #[test]
+    fn an_unremarkable_line_neither_starts_nor_prompts() {
+        let v = classify_progress_line("Connecting to CM server...", "/o");
+        assert_eq!(v.progress, None);
+        assert!(!v.marks_started);
+        assert!(!v.needs_code);
+        assert!(!v.needs_app_confirm);
     }
 }
