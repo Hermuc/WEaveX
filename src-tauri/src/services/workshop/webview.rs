@@ -95,6 +95,18 @@ impl SteamWebview {
             .title("Steam")
             .data_directory(data_dir.to_path_buf())
             .visible(false)
+            // Park it off-screen as well as hiding it.
+            //
+            // `visible(false)` alone is not enough for a WebView2 host: the
+            // control keeps its own composition surface, and DWM composites it
+            // even while the window's WS_VISIBLE bit is clear. Measured here:
+            // with the window merely hidden, a translucent 1250x900 rectangle
+            // (the window's size at 125% DPI) covered the whole main window on
+            // every launch; moving the same window to x=-32000 made the
+            // artefact disappear entirely — a 34,959-pixel A/B difference.
+            // Geometry is restored in `show_login`/`reveal` before the user
+            // ever needs to see it.
+            .position(-32000.0, -32000.0)
             // No decorations and no shadow: this window is meant to be invisible
             // until the user opens the login dialog. With decorations enabled
             // Windows draws a frame + drop shadow for it, and that frame can
@@ -242,6 +254,16 @@ impl SteamWebview {
         Ok(())
     }
 
+    /// Move the window back on screen before it is shown.
+    ///
+    /// The window is created parked at -32000,-32000 so its WebView2
+    /// composition surface cannot bleed through while hidden. Every visible
+    /// path has to undo that, otherwise the user gets an off-screen window and
+    /// thinks the login button does nothing.
+    fn restore_on_screen(w: &tauri::WebviewWindow) {
+        let _ = w.center();
+    }
+
     /// Show the webview window so the user can interact with Steam's login
     /// form. Cookies are persisted to disk automatically by WebView2.
     pub async fn show_login(&self) -> Result<(), tauri::Error> {
@@ -249,6 +271,7 @@ impl SteamWebview {
         self.ensure_window()?;
         if let Some(w) = self.app.get_webview_window(LABEL) {
             let _ = w.set_skip_taskbar(false);
+            Self::restore_on_screen(&w);
             w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))?;
             w.show()?;
             w.set_focus()?;
@@ -267,6 +290,7 @@ impl SteamWebview {
         let _g = self.lock.lock().await;
         if let Some(w) = self.app.get_webview_window(LABEL) {
             let _ = w.set_skip_taskbar(false);
+            Self::restore_on_screen(&w);
             w.show()?;
             w.set_focus()?;
         }
@@ -528,6 +552,7 @@ impl SteamWebview {
         };
         // WebView2 suspends script execution while the window is hidden, so the
         // form probe below would never run. Keep it visible.
+        Self::restore_on_screen(&w);
         let _ = w.show();
         // `eval` never returns a value, so the probe reports its verdict by
         // rewriting the URL fragment and we read it back via `url()`.
@@ -810,6 +835,7 @@ impl SteamWebview {
         //    with Steam Guard anyway.
         if let Some(w) = self.app.get_webview_window(LABEL) {
             let _ = w.set_skip_taskbar(false);
+            Self::restore_on_screen(&w);
             let _ = w.show();
             let _ = w.set_focus();
             sleep(Duration::from_millis(600)).await;
