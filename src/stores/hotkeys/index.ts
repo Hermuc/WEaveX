@@ -111,8 +111,6 @@ export const useHotkeysStore = create<HotkeysState>()(
     (set) => ({
       bindings: { ...DEFAULT_HOTKEYS },
 
-      setBindings: (bindings) => set({ bindings }),
-
       setBinding: (action: HotkeyAction, binding: HotkeyBinding) =>
         set((state) => ({
           bindings: { ...state.bindings, [action]: binding },

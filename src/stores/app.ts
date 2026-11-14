@@ -28,21 +28,16 @@ interface AppState {
   tasksOpen: boolean;
   detailsOpen: boolean;
   paginationWidth: number;
-  setReady: (v: boolean) => void;
-  setLanguage: (lang: string) => void;
   setTheme: (theme: ThemeCode) => void;
   setAccent: (accent: string) => void;
   setWeDirectory: (dir: string) => void;
-  setAvailableLanguages: (list: { code: string; label: string }[]) => void;
   setAccountIndex: (index: number) => void;
   setInfiniteRetryAccounts: (v: boolean) => void;
   setAccounts: (
     accounts: { index: number; username: string; is_custom: boolean }[],
   ) => void;
-  setSidebarCollapsed: (v: boolean) => void;
   toggleSidebar: () => void;
   setLegalAccepted: (v: boolean) => void;
-  setLowPerformance: (v: boolean) => void;
   setEnable3dCards: (v: boolean) => void;
   setEnableLayoutAnimations: (v: boolean) => void;
   setShowActiveFilters: (v: boolean) => void;
@@ -77,8 +72,6 @@ export const useAppStore = create<AppState>()(
       tasksOpen: false,
       detailsOpen: false,
       paginationWidth: 0,
-      setReady: (v) => set({ ready: v }),
-      setLanguage: (language) => set({ language }),
       setTheme: (theme) => {
         set({ theme });
         if (typeof document !== "undefined") {
@@ -87,15 +80,11 @@ export const useAppStore = create<AppState>()(
       },
       setAccent: (accent) => set({ accent }),
       setWeDirectory: (weDirectory) => set({ weDirectory }),
-      setAvailableLanguages: (availableLanguages) =>
-         set({ availableLanguages }),
       setAccountIndex: (accountIndex) => set({ accountIndex }),
       setInfiniteRetryAccounts: (infiniteRetryAccounts) => set({ infiniteRetryAccounts }),
       setAccounts: (accounts) => set({ accounts }),
-      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       setLegalAccepted: (legalAccepted) => set({ legalAccepted }),
-      setLowPerformance: (lowPerformance) => set({ lowPerformance }),
       setEnable3dCards: (enable3dCards) => set({ enable3dCards }),
       setEnableLayoutAnimations: (enableLayoutAnimations) => set({ enableLayoutAnimations }),
       setShowActiveFilters: (showActiveFilters) => set({ showActiveFilters }),

@@ -31,7 +31,6 @@ export type HotkeyConfig = Record<HotkeyAction, HotkeyBinding>;
 
 export interface HotkeysState {
   bindings: HotkeyConfig;
-  setBindings: (config: HotkeyConfig) => void;
   setBinding: (action: HotkeyAction, binding: HotkeyBinding) => void;
   resetToDefaults: () => void;
 }
