@@ -173,3 +173,62 @@ fn escape_js_string(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_js_string_doubles_backslashes_first() {
+        // Backslashes must be doubled before quotes are escaped, otherwise a
+        // quote following a backslash produces a stray escape sequence.
+        assert_eq!(escape_js_string(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn escape_js_string_quotes_and_line_breaks() {
+        assert_eq!(escape_js_string(r#"say "hi""#), r#"say \"hi\""#);
+        assert_eq!(escape_js_string("a\nb"), r"a\nb");
+        assert_eq!(escape_js_string("a\rb"), r"a\rb");
+    }
+
+    #[test]
+    fn escape_js_string_leaves_no_live_line_breaks() {
+        let escaped = escape_js_string("a\\\"\n\r z");
+        assert!(!escaped.contains('\n'));
+        assert!(!escaped.contains('\r'));
+        assert!(escaped.contains(r"\\"));
+        assert!(escaped.contains(r#"\""#));
+    }
+
+    #[test]
+    fn login_script_embeds_credentials_escaped() {
+        // A password with a quote and a newline used to inject raw JS into the
+        // snippet. Only the escaped form may appear, and no live newline may
+        // survive inside the generated string literal.
+        let script = build_login_script("user\"name", "pa\nss\\word");
+        assert!(script.contains(r#"setReactValue(login, "user\"name");"#));
+        assert!(script.contains(r#"setReactValue(pass, "pa\nss\\word");"#));
+        assert!(!script.contains("pa\nss"));
+    }
+
+    #[test]
+    fn login_script_keeps_the_react_value_setter_contract() {
+        let script = build_login_script("u", "p");
+        assert!(script.contains("nativeSetter"));
+        assert!(script.contains("_valueTracker"));
+        assert!(script.contains("dispatchEvent(new Event('input'"));
+        assert!(script.contains("WE_FILL:ready"));
+    }
+
+    #[test]
+    fn page_probe_script_reports_all_page_flags() {
+        let script = build_page_probe_script();
+        assert!(script.contains("flags.push('GUARD')"));
+        assert!(script.contains("flags.push('CAPTCHA')"));
+        assert!(script.contains("flags.push('BADPASS')"));
+        assert!(script.contains("flags.push('LOGINPAGE')"));
+        assert!(script.contains("'#WE_PAGE:'"));
+    }
+}
+
+
