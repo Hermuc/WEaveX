@@ -10,7 +10,6 @@ pub mod services;
 
 pub use core::app_state;
 pub use core::constants;
-pub use core::errors;
 pub use core::logger;
 pub use core::runtime;
 

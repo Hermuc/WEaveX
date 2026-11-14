@@ -155,29 +155,6 @@ impl log::Log for WEaveLogger {
     }
 }
 
-/// Log an operation with context
-#[macro_export]
-macro_rules! log_operation {
-    ($level:expr, $op:expr, $($arg:tt)*) => {
-        log::log!($level, "[{}] {}", $op, format!($($arg)*))
-    };
-}
-
-/// Log a successful operation
-#[macro_export]
-macro_rules! log_success {
-    ($op:expr, $($arg:tt)*) => {
-        $crate::log_operation!(log::Level::Info, $op, $($arg)*)
-    };
-}
-
-/// Log a failed operation
-#[macro_export]
-macro_rules! log_error {
-    ($op:expr, $err:expr, $($arg:tt)*) => {
-        log::error!("[{}] {} - Error: {}", $op, format!($($arg)*), $err)
-    };
-}
 
 #[cfg(test)]
 mod tests {
