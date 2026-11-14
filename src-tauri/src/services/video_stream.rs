@@ -553,142 +553,69 @@ async fn fetch_cdn_tokens(
     out
 }
 
-/// Resolve a workshop item to a [`ResolvedVideo`] streamable over HTTP range.
-pub async fn resolve_video(
-    client: &SteamClient<LoggedIn>,
-    item_id: u64,
-) -> anyhow::Result<ResolvedVideo> {
-    // (kept taking &SteamClient so callers can pass either an owned or cached one)
-    let _t0 = std::time::Instant::now();
-    let req = generated::CPublishedFileGetDetailsRequest {
-        publishedfileids: vec![item_id],
-        includechildren: Some(true),
-        ..Default::default()
-    };
-    let resp = client
-        .call_service_method(
-            "PublishedFile.GetDetails#1",
-            &prost::Message::encode_to_vec(&req),
-        )
-        .await?;
-    let details: generated::CPublishedFileGetDetailsResponse = resp
-        .decode()
-        .map_err(|e| anyhow::anyhow!("workshop details decode: {e}"))?;
-    let item = details
-        .publishedfiledetails
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("workshop item {item_id} not found"))?;
-
-    let manifest_raw = item.hcontent_file.unwrap_or(0);
-    if manifest_raw == 0 {
-        return Err(anyhow::anyhow!(
-            "workshop item {item_id} has no downloadable content"
-        ));
-    }
-    let consumer_app = item.consumer_appid.unwrap_or(WE_APP_ID);
-
-    let app_id = AppId(consumer_app);
-    let depot_id = DepotId(consumer_app);
-    let manifest_id = ManifestId(manifest_raw);
-
-    log::info!("[timing] details {:?}", _t0.elapsed());
-
-    // ── Fast path: the layout is already known ────────────────────────────
-    //
-    // This used to sit AFTER the manifest download, so a cached item still paid
-    // for depot-key + CDN-directory + per-host token + request-code round-trips
-    // and a full manifest fetch before discovering it already had everything.
-    // Measured on this machine: 11s and 30s for two items that were both cache
-    // hits. Checking here turns a repeat open into an instant start.
-    //
-    // The depot key and tokens ARE still needed to fetch chunk bytes, but those
-    // are cheap compared to the manifest and are fetched by the caller only when
-    // it actually asks for bytes. A layout hit here returns a video whose first
-    // range request pays that cost once.
-    let _t1 = std::time::Instant::now();
-    if let Some(cached) = cached_layout(item_id) {
-        if cached.manifest_id == manifest_id.0 && cached.depot_id == depot_id.0 {
-            log::info!(
-                "[timing] layout hit for {item_id} in {:?} ({} spans)",
-                _t1.elapsed(),
-                cached.spans.len()
-            );
-            // Still need endpoints + depot key to actually serve bytes; those
-            // are one round-trip each and are required before the first chunk.
-            let (depot_key, cdn_servers) = futures_util::try_join!(
-                client.get_depot_decryption_key(depot_id, app_id),
-                client.get_cdn_servers(CellId(0), Some(5)),
-            )?;
-            if cdn_servers.is_empty() {
-                return Err(anyhow::anyhow!("no CDN servers available"));
-            }
-            let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
-            let mut endpoints: Vec<CdnEndpoint> = Vec::with_capacity(cdn_servers.len());
-            for (s, token) in cdn_servers.iter().zip(tokens) {
-                let scheme = if s.https { "https" } else { "http" };
-                endpoints.push(CdnEndpoint {
-                    base: format!("{scheme}://{}:{}", s.host, s.port),
-                    token,
-                });
-            }
-            let serving_http = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(60))
-                .build()
-                .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
-            log::info!("[timing] layout-hit total {:?}", _t0.elapsed());
-            return Ok(ResolvedVideo {
-                info: cached,
-                depot_key: Arc::new(depot_key),
-                depot: depot_id,
-                endpoints: Arc::new(endpoints),
-                http: Arc::new(serving_http),
-                preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
-                cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                prefetch_target: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                inflight: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
-            });
-        }
-    }
-
-    let _t_key = std::time::Instant::now();
-    // The depot key and the CDN server list are independent CM round-trips, and
-    // each can stall for seconds on a slow link. Issuing them together saves one
-    // full round-trip off every cold resolve — the user is staring at a spinner.
-    let (depot_key, cdn_servers) = futures_util::try_join!(
-        client.get_depot_decryption_key(depot_id, app_id),
-        client.get_cdn_servers(CellId(0), Some(5)),
-    )?;
-    if cdn_servers.is_empty() {
-        return Err(anyhow::anyhow!("no CDN servers available"));
-    }
-    log::info!("[timing] depot_key+cdn_servers {:?}", _t_key.elapsed());
-
-    // Build one endpoint per advertised server, each with the scheme/port the
-    // directory specified and the auth token issued *for that host* (tokens are
-    // host-scoped; reusing one across hosts yields HTTP 403).
-    //
-    // Tokens are fetched concurrently: doing it serially cost ~40s per dead host
-    // because each CM round-trip can stall, and the user is watching a spinner.
-    let _t2 = std::time::Instant::now();
-    let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
-    log::info!("[timing] tokens {:?}", _t2.elapsed());
-
-    let mut endpoints: Vec<CdnEndpoint> = Vec::with_capacity(cdn_servers.len());
-    for (s, token) in cdn_servers.iter().zip(tokens) {
+/// Build one CDN endpoint per advertised server.
+///
+/// Each endpoint keeps the scheme and port the directory specified, paired with
+/// the auth token issued *for that host*: Steam's CDN tokens are host-scoped,
+/// and reusing one across hosts yields HTTP 403.
+fn build_endpoints(
+    servers: &[steamroom::cdn::CdnServer],
+    tokens: Vec<Option<String>>,
+) -> Vec<CdnEndpoint> {
+    let mut endpoints = Vec::with_capacity(servers.len());
+    for (s, token) in servers.iter().zip(tokens) {
         let scheme = if s.https { "https" } else { "http" };
         endpoints.push(CdnEndpoint {
             base: format!("{scheme}://{}:{}", s.host, s.port),
             token,
         });
     }
-    let request_code = client
-        .get_manifest_request_code(app_id, depot_id, manifest_id, None, None)
-        .await?
-        .unwrap_or(0);
+    endpoints
+}
 
+/// Assemble the runtime half of a resolved video.
+///
+/// Every field here is fresh per stream (its own prefetch cache, byte counter
+/// and cancellation flag); only `info` / `depot_key` / `endpoints` / `http`
+/// differ between the cache-hit and cold paths, so the boilerplate lives in one
+/// place instead of being written out twice.
+fn build_resolved_video(
+    info: VideoStreamInfo,
+    depot_key: DepotKey,
+    depot: DepotId,
+    endpoints: Vec<CdnEndpoint>,
+    http: reqwest::Client,
+) -> ResolvedVideo {
+    ResolvedVideo {
+        info,
+        depot_key: Arc::new(depot_key),
+        depot,
+        endpoints: Arc::new(endpoints),
+        http: Arc::new(http),
+        preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+        cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prefetch_target: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        inflight: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
+    }
+}
+
+/// Fetch the raw manifest body for one depot/manifest pair.
+///
+/// Every endpoint is tried concurrently with a hard timeout and the first
+/// successful body wins. The pooled downloader steamroom offers walks hosts
+/// serially with no per-request timeout, which measured in minutes when most
+/// of the directory is unreachable from this network, so it is kept only as a
+/// last resort after the concurrent attempt fails.
+async fn fetch_manifest(
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    request_code: u64,
+    endpoints: &[CdnEndpoint],
+    cdn_servers: &[steamroom::cdn::CdnServer],
+) -> anyhow::Result<Vec<u8>> {
     // Download the manifest ourselves instead of using
     // `CdnClient::download_manifest_pooled`: that helper walks the whole server
     // pool serially with no per-request timeout, which cost minutes when most
@@ -763,7 +690,7 @@ pub async fn resolve_video(
             // serially and has no per-request timeout, so it is slow, but it is
             // the path that has actually succeeded on constrained networks.
             log::warn!("[video-stream] direct manifest fetch failed; falling back to pooled");
-            let pool = steamroom::cdn::CdnServerPool::new(cdn_servers.clone());
+            let pool = steamroom::cdn::CdnServerPool::new(cdn_servers.to_vec());
             let cdn =
                 steamroom::cdn::CdnClient::new().map_err(|e| anyhow::anyhow!("cdn client: {e}"))?;
             let mut got = None;
@@ -791,6 +718,126 @@ pub async fn resolve_video(
             got.ok_or_else(|| anyhow::anyhow!("manifest download failed on every CDN endpoint"))?
         }
     };
+    Ok(manifest_data)
+}
+
+
+/// Resolve a workshop item to a [`ResolvedVideo`] streamable over HTTP range.
+pub async fn resolve_video(
+    client: &SteamClient<LoggedIn>,
+    item_id: u64,
+) -> anyhow::Result<ResolvedVideo> {
+    // (kept taking &SteamClient so callers can pass either an owned or cached one)
+    let _t0 = std::time::Instant::now();
+    let req = generated::CPublishedFileGetDetailsRequest {
+        publishedfileids: vec![item_id],
+        includechildren: Some(true),
+        ..Default::default()
+    };
+    let resp = client
+        .call_service_method(
+            "PublishedFile.GetDetails#1",
+            &prost::Message::encode_to_vec(&req),
+        )
+        .await?;
+    let details: generated::CPublishedFileGetDetailsResponse = resp
+        .decode()
+        .map_err(|e| anyhow::anyhow!("workshop details decode: {e}"))?;
+    let item = details
+        .publishedfiledetails
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("workshop item {item_id} not found"))?;
+
+    let manifest_raw = item.hcontent_file.unwrap_or(0);
+    if manifest_raw == 0 {
+        return Err(anyhow::anyhow!(
+            "workshop item {item_id} has no downloadable content"
+        ));
+    }
+    let consumer_app = item.consumer_appid.unwrap_or(WE_APP_ID);
+
+    let app_id = AppId(consumer_app);
+    let depot_id = DepotId(consumer_app);
+    let manifest_id = ManifestId(manifest_raw);
+
+    log::info!("[timing] details {:?}", _t0.elapsed());
+
+    // ── Fast path: the layout is already known ────────────────────────────
+    //
+    // This used to sit AFTER the manifest download, so a cached item still paid
+    // for depot-key + CDN-directory + per-host token + request-code round-trips
+    // and a full manifest fetch before discovering it already had everything.
+    // Measured on this machine: 11s and 30s for two items that were both cache
+    // hits. Checking here turns a repeat open into an instant start.
+    //
+    // The depot key and tokens ARE still needed to fetch chunk bytes, but those
+    // are cheap compared to the manifest and are fetched by the caller only when
+    // it actually asks for bytes. A layout hit here returns a video whose first
+    // range request pays that cost once.
+    let _t1 = std::time::Instant::now();
+    if let Some(cached) = cached_layout(item_id) {
+        if cached.manifest_id == manifest_id.0 && cached.depot_id == depot_id.0 {
+            log::info!(
+                "[timing] layout hit for {item_id} in {:?} ({} spans)",
+                _t1.elapsed(),
+                cached.spans.len()
+            );
+            // Still need endpoints + depot key to actually serve bytes; those
+            // are one round-trip each and are required before the first chunk.
+            let (depot_key, cdn_servers) = futures_util::try_join!(
+                client.get_depot_decryption_key(depot_id, app_id),
+                client.get_cdn_servers(CellId(0), Some(5)),
+            )?;
+            if cdn_servers.is_empty() {
+                return Err(anyhow::anyhow!("no CDN servers available"));
+            }
+            let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
+            let endpoints = build_endpoints(&cdn_servers, tokens);
+            let serving_http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
+            log::info!("[timing] layout-hit total {:?}", _t0.elapsed());
+            return Ok(build_resolved_video(
+                cached,
+                depot_key,
+                depot_id,
+                endpoints,
+                serving_http,
+            ));
+        }
+    }
+
+    let _t_key = std::time::Instant::now();
+    // The depot key and the CDN server list are independent CM round-trips, and
+    // each can stall for seconds on a slow link. Issuing them together saves one
+    // full round-trip off every cold resolve — the user is staring at a spinner.
+    let (depot_key, cdn_servers) = futures_util::try_join!(
+        client.get_depot_decryption_key(depot_id, app_id),
+        client.get_cdn_servers(CellId(0), Some(5)),
+    )?;
+    if cdn_servers.is_empty() {
+        return Err(anyhow::anyhow!("no CDN servers available"));
+    }
+    log::info!("[timing] depot_key+cdn_servers {:?}", _t_key.elapsed());
+
+    // Build one endpoint per advertised server, each with the scheme/port the
+    // directory specified and the auth token issued *for that host* (tokens are
+    // host-scoped; reusing one across hosts yields HTTP 403).
+    //
+    // Tokens are fetched concurrently: doing it serially cost ~40s per dead host
+    // because each CM round-trip can stall, and the user is watching a spinner.
+    let _t2 = std::time::Instant::now();
+    let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
+    log::info!("[timing] tokens {:?}", _t2.elapsed());
+
+    let endpoints = build_endpoints(&cdn_servers, tokens);
+    let request_code = client
+        .get_manifest_request_code(app_id, depot_id, manifest_id, None, None)
+        .await?
+        .unwrap_or(0);
+
+    let manifest_data = fetch_manifest(depot_id, manifest_id, request_code, &endpoints, &cdn_servers).await?;
     log::info!("[timing] manifest_download total {:?}", _t0.elapsed());
     let manifest_bytes = decompress_manifest(&manifest_data)?;
     let mut manifest = DepotManifest::parse(&manifest_bytes)
@@ -921,20 +968,7 @@ pub async fn resolve_video(
     }
     store_layout(item_id, &info);
 
-    Ok(ResolvedVideo {
-        info,
-        depot_key: Arc::new(depot_key),
-        depot: depot_id,
-        endpoints: Arc::new(live),
-        http: Arc::new(http),
-        preferred: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        cache: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
-        cached_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        prefetch_target: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        inflight: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
-    })
+    Ok(build_resolved_video(info, depot_key, depot_id, live, http))
 }
 
 #[cfg(test)]
