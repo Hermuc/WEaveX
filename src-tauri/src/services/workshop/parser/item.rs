@@ -1,12 +1,12 @@
 //! Item-details page parser (`filedetails/?id=...`).
 
-use regex::Regex;
-use scraper::{Html, Selector};
+use scraper::Html;
 use serde_json::{Map, Value};
 
 use crate::workshop::{CollectionRef, WorkshopItem};
 
 use super::common::*;
+use super::selectors;
 
 pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     let doc = Html::parse_document(html);
@@ -81,8 +81,8 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     }
 
     let stat_keys = ["Posted", "Posted:", "Updated", "Updated:"];
-    let labels = Selector::parse(".detailsStatLeft").unwrap();
-    let values = Selector::parse(".detailsStatRight").unwrap();
+    let labels = &*selectors::STAT_LEFT;
+    let values = &*selectors::STAT_RIGHT;
     let lbls: Vec<_> = doc.select(&labels).map(text).collect();
     let vals: Vec<_> = doc.select(&values).map(text).collect();
     for (i, lbl) in lbls.iter().enumerate() {
@@ -99,14 +99,14 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
         }
     }
 
-    let rating_sel = Selector::parse(".fileRatingDetails img").unwrap();
+    let rating_sel = &*selectors::RATING_IMG;
     if let Some(img) = doc.select(&rating_sel).next() {
         if let Some(src) = img.value().attr("src") {
             item.rating_star_file = src.to_string();
         }
     }
 
-    let num_sel = Selector::parse(".numRatings").unwrap();
+    let num_sel = &*selectors::NUM_RATINGS;
     if let Some(el) = doc.select(&num_sel).next() {
         let raw = text(el);
         let digits: String = raw
@@ -120,8 +120,8 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     // <a>Tag1</a>, <a>Tag2</a></div>` — we extract both the category label
     // (e.g. "Type", "Genre", "Resolution") and the list of values so the UI
     // can render them grouped like the Python app does.
-    let tag_block_sel = Selector::parse(".workshopTags").unwrap();
-    let tag_link_sel = Selector::parse("a").unwrap();
+    let tag_block_sel = &*selectors::TAG_BLOCK;
+    let tag_link_sel = &*selectors::ANCHOR;
     let mut tags = Vec::new();
     for block in doc.select(&tag_block_sel) {
         // The category label is the leading text node before the <a> tags.
@@ -164,11 +164,11 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     //     <div class="parentCollectionTitle">Title</div>
     //     <div class="parentCollectionNumChildren">42 items</div>
     //   </div>
-    let pc_sel = Selector::parse(".parentCollection").unwrap();
-    let title_sel = Selector::parse(".parentCollectionTitle").unwrap();
-    let count_sel = Selector::parse(".parentCollectionNumChildren").unwrap();
-    let id_re = Regex::new(r#"id=(\d+)"#).unwrap();
-    let num_re = Regex::new(r#"(\d+)"#).unwrap();
+    let pc_sel = &*selectors::PARENT_COLLECTION;
+    let title_sel = &*selectors::PARENT_COLLECTION_TITLE;
+    let count_sel = &*selectors::PARENT_COLLECTION_COUNT;
+    let id_re = &*selectors::ID_EQ_DIGITS;
+    let num_re = &*selectors::DIGITS;
     for pc in doc.select(&pc_sel) {
         let onclick = pc
             .value()

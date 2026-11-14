@@ -9,9 +9,10 @@
 //!
 //! Only pubfileid, an image URL and an author link are stable markers.
 
-use regex::Regex;
-use scraper::{Html, Selector};
+use scraper::Html;
 use serde_json::Value;
+
+use super::selectors;
 use std::collections::HashMap;
 
 use crate::workshop::{WorkshopItem, WorkshopPage};
@@ -82,14 +83,10 @@ pub fn parse_browse(html: &str, current_page: u32) -> WorkshopPage {
 ///
 ///   `doc.querySelectorAll('.tmIrUKf-Mh8-, .sDK5fonBQMA-, .workshopItem, .workshopItemCollection')`
 fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
-    let container_sel = Selector::parse(
-        ".tmIrUKf-Mh8-, .sDK5fonBQMA-, .workshopItem, .workshopItemCollection, \
-         a.workshopItemCollection",
-    )
-    .unwrap();
-    let link_sel = Selector::parse(r#"a[href*="filedetails"]"#).unwrap();
-    let title_sel = Selector::parse("._3rvey4VpXts- a, .workshopItemTitle").unwrap();
-    let img_sel = Selector::parse("img").unwrap();
+    let container_sel = &*selectors::BROWSE_CONTAINER;
+    let link_sel = &*selectors::BROWSE_LINK;
+    let title_sel = &*selectors::BROWSE_TITLE;
+    let img_sel = &*selectors::IMG;
     // Author chip selectors. On the Collections browse tiles Steam ships
     // just `<span class="workshopItemAuthorName">NAME</span>` (preceded by
     // a loose "Collection by" text node — no link, no URL). On regular
@@ -97,14 +94,9 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
     // class="workshop_author_link" href="…">NAME</a></div>`. We try the
     // linked form first so `author_url` is populated when available, then
     // fall back to plain text.
-    let author_link_sel = Selector::parse(
-        ".CmHGWYJjMk0- a, .workshopItemAuthorName a, \
-         a.workshop_author_link, \
-         a[href*=\"/myworkshopfiles/\"], a[href*=\"/myworkshopcollections/\"]",
-    )
-    .unwrap();
-    let author_text_sel = Selector::parse(".workshopItemAuthorName").unwrap();
-    let author_re = Regex::new(r"(?i)^\s*(?:by|collection\s+by)\s+").unwrap();
+    let author_link_sel = &*selectors::BROWSE_AUTHOR_LINK;
+    let author_text_sel = &*selectors::BROWSE_AUTHOR_TEXT;
+    let author_re = &*selectors::BROWSE_AUTHOR_PREFIX;
 
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -190,8 +182,8 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
 /// matches anything. Walks every `a[href*="filedetails"]` link, merges
 /// duplicates by pubfileid, and pairs nearby `By NAME` author links.
 fn parse_browse_loose(doc: &Html, html: &str) -> Vec<WorkshopItem> {
-    let link_sel = Selector::parse(r#"a[href*="filedetails/?id="]"#).unwrap();
-    let img_sel = Selector::parse("img").unwrap();
+    let link_sel = &*selectors::BROWSE_LINK_EXACT;
+    let img_sel = &*selectors::IMG;
     let mut by_id: HashMap<String, WorkshopItem> = HashMap::new();
 
     for a in doc.select(&link_sel) {
@@ -232,11 +224,8 @@ fn parse_browse_loose(doc: &Html, html: &str) -> Vec<WorkshopItem> {
     // Pair `By NAME` links with the nearest preceding filedetails link.
     // Collection tiles link to `myworkshopcollections` instead of
     // `myworkshopfiles` so both have to be matched here.
-    let author_re = Regex::new(
-        r#"<a href="(https://steamcommunity\.com/(?:id|profiles)/[^"]+/(?:myworkshopfiles|myworkshopcollections)/[^"]*)"[^>]*>By\s+([^<]+)</a>"#,
-    )
-    .unwrap();
-    let id_re = Regex::new(r#"filedetails/\?id=(\d+)"#).unwrap();
+    let author_re = &*selectors::BROWSE_AUTHOR_HREF;
+    let id_re = &*selectors::FILEDETAILS_ID;
     let id_positions: Vec<(String, usize)> = id_re
         .captures_iter(html)
         .map(|c| (c[1].to_string(), c.get(0).unwrap().start()))
@@ -280,7 +269,7 @@ fn parse_browse_ssr(html: &str) -> Vec<WorkshopItem> {
         return Vec::new();
     }
     // Pull out the queries blob: `queries":"…escaped JSON…"`
-    let re = Regex::new(r#"queries"\s*:\s*"((?:\\.|[^"\\])*)""#).unwrap();
+    let re = &*selectors::SSR_QUERIES;
     let Some(cap) = re.captures(html) else {
         return Vec::new();
     };
@@ -431,19 +420,14 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     // Priority 1: look for the ellipsis pattern followed by the last number in the pagination.
     // Pattern: <div>...</div><div class="...Panel" tabindex="0" role="button">1,000</div>
     // IMPORTANT: look for the LAST match, because there may be several ellipses.
-    let re_ellipsis_last = Regex::new(
-        r#"<div>\.\.\.</div><div[^>]*class="[^"]*Panel[^"]*"[^>]*tabindex="0"[^>]*role="button"[^>]*>\s*([\d,]+)\s*</div>"#
-    ).unwrap();
+    let re_ellipsis_last = &*selectors::PAGE_ELLIPSIS_LAST;
 
     // Find ALL matches and take the last one.
     let last_match = re_ellipsis_last.captures_iter(html).last();
     if let Some(cap) = last_match {
         if let Ok(max) = cap[1].replace(',', "").parse::<u32>() {
             // Try to determine the total number of items from the text.
-            let re_total = Regex::new(
-                r#"(?:Showing)\s+\d+[\s\-–]\d+\s+(?:of)\s+([\d,.\s]+)"#,
-            )
-            .unwrap();
+            let re_total = &*selectors::PAGE_TOTAL_SHORT;
             let total_items = re_total
                 .captures(html)
                 .and_then(|cap| cap[1].replace([',', '.', ' '], "").parse::<u64>().ok())
@@ -457,9 +441,7 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     }
 
     // Priority 2: extract from the text "Showing X-Y of Z".
-    let re_total =
-        Regex::new(r#"(?:Showing)\s+(\d+)[\s\-–](\d+)\s+(?:of)\s+([\d,.\s]+)"#)
-            .unwrap();
+    let re_total = &*selectors::PAGE_SHOWING;
     if let Some(cap) = re_total.captures(html) {
         let start: u64 = cap[1].replace([',', '.', ' '], "").parse().unwrap_or(0);
         let end: u64 = cap[2].replace([',', '.', ' '], "").parse().unwrap_or(0);
@@ -471,9 +453,8 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     }
 
     // Priority 3: search the pagination controls by CSS selector (legacy method).
-    if let Ok(paging_sel) =
-        Selector::parse(".workshopBrowsePagingControls a, .workshopBrowsePagingControls span")
     {
+        let paging_sel = &*selectors::PAGE_CONTROLS;
         let mut max_page = 0;
         for el in doc.select(&paging_sel) {
             let text = el.text().collect::<String>().trim().to_string();
@@ -491,8 +472,8 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
 
     // Priority 4: search the pagination links with a regular expression (legacy method, fallback).
     // Improved regular expression that tolerates any attribute order.
-    let re_pages_1 = Regex::new(r#"class="pagelink"[^>]*>\s*(\d+)\s*<"#).unwrap();
-    let re_pages_2 = Regex::new(r#"class="page_current"[^>]*>\s*(\d+)\s*<"#).unwrap();
+    let re_pages_1 = &*selectors::PAGE_LINK;
+    let re_pages_2 = &*selectors::PAGE_CURRENT;
 
     let max_page_1 = re_pages_1
         .captures_iter(html)

@@ -1,12 +1,12 @@
 //! Collection-contents page parser.
 
-use regex::Regex;
-use scraper::{Html, Selector};
+use scraper::Html;
 use serde_json::Value;
 
 use crate::workshop::{CollectionContents, CollectionRef, WorkshopItem};
 
 use super::common::*;
+use super::selectors;
 
 pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionContents {
     let doc = Html::parse_document(html);
@@ -101,7 +101,7 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
     }
     if let Some(el) = select_first(&doc, ".rightSectionTopTitle") {
         let raw = text(el);
-        if let Some(m) = Regex::new(r"(\d+)").unwrap().captures(&raw) {
+        if let Some(m) = selectors::DIGITS.captures(&raw) {
             if let Ok(n) = m[1].parse::<u64>() {
                 info.insert(
                     "item_count".into(),
@@ -110,8 +110,8 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
             }
         }
     }
-    let stat_left_sel = Selector::parse(".detailsStatLeft").unwrap();
-    let stat_right_sel = Selector::parse(".detailsStatRight").unwrap();
+    let stat_left_sel = &*selectors::STAT_LEFT;
+    let stat_right_sel = &*selectors::STAT_RIGHT;
     let lefts: Vec<_> = doc.select(&stat_left_sel).collect();
     let rights: Vec<_> = doc.select(&stat_right_sel).collect();
     for (l, r) in lefts.iter().zip(rights.iter()) {
@@ -138,9 +138,9 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
         }
     }
     // Tag groups (.workshopTags > .workshopTagsTitle + <a> links).
-    let tag_block_sel = Selector::parse(".workshopTags").unwrap();
-    let tag_title_sel = Selector::parse(".workshopTagsTitle").unwrap();
-    let tag_link_sel = Selector::parse("a").unwrap();
+    let tag_block_sel = &*selectors::TAG_BLOCK;
+    let tag_title_sel = &*selectors::TAG_TITLE;
+    let tag_link_sel = &*selectors::ANCHOR;
     for td in doc.select(&tag_block_sel) {
         let Some(title_el) = td.select(&tag_title_sel).next() else {
             continue;
@@ -165,12 +165,12 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
     c.info = Value::Object(info);
 
     // -------- items in this collection (with their own author chips) ----
-    let item_sel = Selector::parse(".collectionItem").unwrap();
-    let link_sel = Selector::parse(r#"a[href*="filedetails"]"#).unwrap();
-    let preview_sel = Selector::parse(".workshopItemPreviewImage").unwrap();
-    let img_sel = Selector::parse("img").unwrap();
-    let title_sel = Selector::parse(".workshopItemTitle").unwrap();
-    let author_sel = Selector::parse(".workshopItemAuthorName a").unwrap();
+    let item_sel = &*selectors::COLLECTION_ITEM;
+    let link_sel = &*selectors::BROWSE_LINK;
+    let preview_sel = &*selectors::COLLECTION_PREVIEW;
+    let img_sel = &*selectors::IMG;
+    let title_sel = &*selectors::WORKSHOP_TITLE;
+    let author_sel = &*selectors::WORKSHOP_AUTHOR_ANCHOR;
 
     let mut seen = std::collections::HashSet::new();
     for e in doc.select(&item_sel) {
@@ -214,9 +214,9 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
     }
 
     // -------- related collections sidebar ------------------------------
-    let related_sel = Selector::parse(".collections > .workshopItem").unwrap();
-    let count_sel = Selector::parse(".workshopCollectionNumChildren").unwrap();
-    let digits_re = Regex::new(r"(\d+)").unwrap();
+    let related_sel = &*selectors::COLLECTION_RELATED;
+    let count_sel = &*selectors::COLLECTION_COUNT;
+    let digits_re = &*selectors::DIGITS;
     for r in doc.select(&related_sel) {
         let Some(link) = r.select(&link_sel).next() else {
             continue;

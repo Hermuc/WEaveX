@@ -12,6 +12,7 @@ mod browse;
 mod collection;
 mod common;
 mod item;
+mod selectors;
 
 pub use browse::parse_browse;
 pub use collection::parse_collection_contents;
