@@ -166,7 +166,7 @@ pub async fn accounts_verify_custom(
     {
         let username_clone = username.clone();
         tokio::spawn(async move {
-            use tokio::time::{timeout, Duration, Instant};
+            use tokio::time::{timeout, Instant};
 
             let mut got_result = false;
             let mut prompted = false; // require_2fa or require_app_confirm sent
@@ -186,10 +186,10 @@ pub async fn accounts_verify_custom(
             // contrast, keeps emitting newline-terminated lines (and is handled
             // below). So: prolonged silence after the login attempt => a code is
             // being requested => open the 2FA modal.
-            let quiet_2fa_threshold = Duration::from_secs(6);
+            let quiet_2fa_threshold = QUIET_2FA_THRESHOLD;
 
             loop {
-                let next = timeout(Duration::from_millis(500), rx.recv()).await;
+                let next = timeout(AUTH_LINE_POLL, rx.recv()).await;
                 let line = match next {
                     Ok(Some(line)) => line,
                     Ok(None) => break, // channel closed: process exited
@@ -346,3 +346,9 @@ pub async fn accounts_submit_2fa(username: String, code: String) -> Result<(), S
     }
     Err("Auth task not found or stdin unavailable".to_string())
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// After login starts, this much silence means a code prompt is blocking.
+const QUIET_2FA_THRESHOLD: tokio::time::Duration = tokio::time::Duration::from_secs(6);
+/// Poll interval while reading auth output.
+const AUTH_LINE_POLL: tokio::time::Duration = tokio::time::Duration::from_millis(500);

@@ -132,7 +132,7 @@ impl AppState {
             // do, with a 15s `recv_timeout`) therefore deadlocked the caller: the
             // whole startup sync died silently and the app behaved as if the
             // session had never been restored.
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::thread::sleep(EVENT_LOOP_SETTLE);
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
                 // Create the hidden Steam webview first. Every cookie/session
@@ -160,7 +160,7 @@ impl AppState {
                     if installed {
                         // Wait for the webview to pick up the injected cookies
                         // before declaring the saved session restored.
-                        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                        tokio::time::sleep(SESSION_RESTORE_SETTLE).await;
                         restored = true;
                         log::info!("[startup] installed saved session for {acct}");
                     }
@@ -293,3 +293,9 @@ pub fn resolve_app_data_dir() -> PathBuf {
 
     PathBuf::from("./WEave")
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// Let the main thread start pumping before posting to it.
+const EVENT_LOOP_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+/// Wait for injected cookies to apply before declaring restore.
+const SESSION_RESTORE_SETTLE: std::time::Duration = std::time::Duration::from_millis(1200);

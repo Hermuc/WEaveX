@@ -61,7 +61,7 @@ pub async fn translate_text(
 
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 WEave")
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(TRANSLATE_TIMEOUT)
         .build()?;
 
     let body = client.get(url).send().await?.text().await?;
@@ -114,3 +114,7 @@ fn map_language(code: &str) -> &str {
         }
     }
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// HTTP timeout for a translation request.
+const TRANSLATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);

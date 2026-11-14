@@ -24,7 +24,7 @@ pub async fn check_for_updates() -> UpdateInfo {
 
     let client = match reqwest::Client::builder()
         .user_agent(format!("WEave/{}", APP_VERSION))
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(UPDATE_CHECK_TIMEOUT)
         .build()
     {
         Ok(c) => c,
@@ -115,3 +115,7 @@ fn version_is_newer(remote: &str, local: &str) -> bool {
     }
     false
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// HTTP timeout for the update check.
+const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);

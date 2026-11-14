@@ -140,7 +140,7 @@ impl WorkshopClient {
             .cookie_provider(cookie_jar.clone())
             .gzip(true)
             .brotli(true)
-            .timeout(Duration::from_secs(20))
+            .timeout(WORKSHOP_REQUEST_TIMEOUT)
             .user_agent(format!(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 WEave/{}",
                 APP_VERSION
@@ -455,3 +455,7 @@ impl WorkshopClient {
         Ok(contents)
     }
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// HTTP timeout for a workshop page request.
+const WORKSHOP_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);

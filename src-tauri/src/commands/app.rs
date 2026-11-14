@@ -86,7 +86,7 @@ pub fn app_quit(app: AppHandle) {
     // process exit on a background thread so even if the runtime locks up
     // the process actually terminates.
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        std::thread::sleep(FORCED_EXIT_DELAY);
         std::process::exit(0);
     });
     app.exit(0);
@@ -207,3 +207,7 @@ pub fn app_cancel_init_metadata(state: AppStateHandle<'_>) {
         .metadata_init_cancel
         .store(true, std::sync::atomic::Ordering::SeqCst);
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// Brief pause before a hard process exit so the runtime can unwind.
+const FORCED_EXIT_DELAY: std::time::Duration = std::time::Duration::from_millis(150);

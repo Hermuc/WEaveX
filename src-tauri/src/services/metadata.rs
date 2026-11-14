@@ -117,7 +117,7 @@ pub async fn batch_initialize_metadata(
         );
 
         // Increased rate-limit delay to avoid 429 errors from Steam
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        tokio::time::sleep(METADATA_RATE_LIMIT_DELAY).await;
     }
 
     // One rewrite for the whole batch instead of one per wallpaper.
@@ -143,6 +143,9 @@ fn is_metadata_complete(cached: &Value, pubfileid: &str) -> bool {
         .unwrap_or(false);
     title_ok && tags_ok
 }
+// ── Timing constants ──────────────────────────────────────────
+/// Delay between metadata requests to avoid Steam 429s.
+const METADATA_RATE_LIMIT_DELAY: Duration = Duration::from_millis(800);
 
 #[cfg(test)]
 mod tests {

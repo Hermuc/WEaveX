@@ -295,9 +295,9 @@ impl DownloadManager {
                     let budget = if download_started {
                         // Once transferring, stay patient: a stalled-but-alive
                         // download can legitimately go quiet for a while.
-                        std::time::Duration::from_secs(300)
+                        DOWNLOAD_STALL_BUDGET_WITH_PROGRESS
                     } else {
-                        std::time::Duration::from_secs(45)
+                        DOWNLOAD_CONNECT_BUDGET
                     };
                     if idle >= budget {
                         log::warn!(
@@ -447,7 +447,7 @@ impl DownloadManager {
                 );
                 // Back off briefly before the next account attempt so a
                 // rate-limited login does not hammer Steam.
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(DOWNLOAD_RETRY_BACKOFF).await;
             }
         });
 
@@ -520,3 +520,11 @@ impl DownloadManager {
         self.app.emit("download://status", status).ok();
     }
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// Once transferring, allow this much silence before giving up.
+const DOWNLOAD_STALL_BUDGET_WITH_PROGRESS: std::time::Duration = std::time::Duration::from_secs(300);
+/// Before any transfer starts, a shorter silence budget for a dead CM.
+const DOWNLOAD_CONNECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);
+/// Back off before retrying with the next account.
+const DOWNLOAD_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);

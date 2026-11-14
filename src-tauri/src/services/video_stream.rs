@@ -590,7 +590,7 @@ async fn fetch_manifest(
     // tens of seconds. All endpoints are tried concurrently, so the wall-clock
     // cost is one timeout, not one per host.
     let manifest_http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(MANIFEST_DOWNLOAD_TIMEOUT)
         .build()
         .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
 
@@ -758,7 +758,7 @@ pub async fn resolve_video(
             let tokens = fetch_cdn_tokens(client, app_id, depot_id, &cdn_servers).await;
             let endpoints = build_endpoints(&cdn_servers, tokens);
             let serving_http = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(60))
+                .timeout(MANIFEST_RETRY_TIMEOUT)
                 .build()
                 .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
             log::info!("[timing] layout-hit total {:?}", _t0.elapsed());
@@ -844,7 +844,7 @@ pub async fn resolve_video(
     // native-tls (schannel) is the TLS stack that validates Steam's CDN
     // certificates on this machine; steamroom's rustls client does not.
     let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(CHUNK_HTTP_TIMEOUT)
         .build()
         .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
 
@@ -858,7 +858,7 @@ pub async fn resolve_video(
         .ok_or_else(|| anyhow::anyhow!("video has no chunks"))?
         .clone();
     let probe_http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
+        .timeout(ENDPOINT_PROBE_TIMEOUT)
         .build()
         .map_err(|e| anyhow::anyhow!("http client: {e}"))?;
 
@@ -934,6 +934,15 @@ pub async fn resolve_video(
 
     Ok(build_resolved_video(info, depot_key, depot_id, live, http))
 }
+// ── Timing constants ──────────────────────────────────────────
+/// A manifest body can take tens of seconds on slow links.
+const MANIFEST_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// Timeout for the pooled manifest-download fallback.
+const MANIFEST_RETRY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// HTTP client timeout for serving chunk bytes.
+const CHUNK_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Short probe timeout so dead hosts fail fast.
+const ENDPOINT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 #[cfg(test)]
 mod tests {

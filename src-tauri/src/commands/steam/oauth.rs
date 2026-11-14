@@ -71,7 +71,7 @@ async fn complete_oauth_login(
         .map_err(|e| format!("install cookies: {e}"))?;
     // Give the webview a moment to apply the new cookies before syncing them
     // into the reqwest jar and querying Steam.
-    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    tokio::time::sleep(OAUTH_COOKIE_SETTLE).await;
     let _ = state.steam_webview.sync_cookies().await;
     state.workshop.clear_caches();
     let _ = state.app_handle.emit("steam-login-success", ());
@@ -189,3 +189,7 @@ pub async fn steam_oauth_submit_guard(
     let user = state.accounts.preferred_parser_credentials().username;
     complete_oauth_login(&state, user, approved).await
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// Wait for injected cookies before verifying the OAuth session.
+const OAUTH_COOKIE_SETTLE: std::time::Duration = std::time::Duration::from_millis(1200);

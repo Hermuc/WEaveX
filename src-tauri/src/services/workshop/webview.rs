@@ -228,7 +228,7 @@ impl SteamWebview {
             // the main thread is already pumping its event loop. The caller in
             // `app_state` sleeps briefly before getting here to guarantee that;
             // without it the closure below could never be delivered.
-            match rx.recv_timeout(Duration::from_secs(15)) {
+            match rx.recv_timeout(WINDOW_CREATE_TIMEOUT) {
                 Ok(true) => true,
                 Ok(false) => {
                     log::warn!("[steam-webview] hidden window creation failed");
@@ -916,3 +916,7 @@ impl SteamWebview {
         Ok(self.is_logged_in_inner())
     }
 }
+
+// ── Timing constants ──────────────────────────────────────────
+/// How long to wait for the main thread to build the hidden window.
+const WINDOW_CREATE_TIMEOUT: Duration = Duration::from_secs(15);
