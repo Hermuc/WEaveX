@@ -5,6 +5,7 @@ use crate::workshop::SteamAccount;
 
 use tauri::Emitter;
 
+use crate::services::steam_auth::jwt_subject;
 use steamroom_client::login::CredentialsLoginFlow;
 use steamroom_client::login::LoginBuilder;
 
@@ -532,15 +533,6 @@ async fn complete_oauth_login(
     let _ = approved.finish().await;
 
     Ok(steam_id)
-}
-
-/// `sub` claim of a Steam access-token JWT (the SteamID64).
-fn jwt_subject(token: &str) -> Option<String> {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    let payload = token.split('.').nth(1)?;
-    let raw = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&raw).ok()?;
-    json.get("sub")?.as_str().map(|s| s.to_string())
 }
 
 /// Start an OAuth sign-in with a username and password.

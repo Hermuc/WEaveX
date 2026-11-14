@@ -5,6 +5,7 @@ pub mod fs_util;
 pub mod i18n;
 pub mod metadata;
 pub mod qr;
+pub mod steam_auth;
 pub mod translator;
 pub mod updater;
 pub mod video_player;
