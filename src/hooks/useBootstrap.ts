@@ -22,8 +22,15 @@ import { EVENTS } from "@/lib/events";
 
 export function useBootstrap() {
   const dotnetInitialized = useRef(false);
+  void dotnetInitialized;
 
   useEffect(() => {
+    // Show the window before any command runs: the chain below is synchronous
+    // on the Rust side, so it runs on the main thread and blocks repainting.
+    void tryInvoke("app_restore_window_geometry", undefined, false).then(() =>
+      tryInvoke("app_show_main_window", undefined, undefined),
+    );
+
     void (async () => {
       if (!inTauri) {
         useAppStore.setState({ ready: true });
@@ -127,44 +134,16 @@ export function useBootstrap() {
       // settles. Kept fire-and-forget so it never blocks the rest of boot.
       void syncSteamSession();
 
-      // Reveal the main window once the first paint is done.
-      //
-      // This used to fire before `ready` was committed, so the window became
-      // visible while React was still mounting and WebView2 had an empty
-      // surface — the translucent rectangle users saw on every launch.
-      //
-      // Do NOT use requestAnimationFrame here. The window starts hidden
-      // (`visible: false`) and a hidden WebView does not run animation
-      // frames, so a rAF-based reveal never executes and the app appears not
-      // to start at all. A timer always runs; `ready` is already committed
-      // above it, so by the time it fires the first view has been rendered
-      // and the browser has had a chance to paint it.
-      const revealWindow = () => {
-        void invoke("app_restore_window_geometry")
-          .then(() => invoke("app_show_main_window"))
-          .catch(() => {
-            void invoke("app_show_main_window").catch(() => undefined);
-          });
-      };
-      window.setTimeout(revealWindow, 50);
-
-      // Auto-check for updates on startup if enabled.
-      void maybeCheckForUpdates();
-
-      // Initialize .NET Runtime and plugins check after all event listeners are set up
-      // Only call once to prevent duplicate initialization
-      if (!dotnetInitialized.current) {
-        dotnetInitialized.current = true;
-        void invoke("dotnet_init").catch(() => undefined);
-        void invoke("plugins_init").catch(() => undefined);
-      }
-
-      // Persist window state on close if enabled.
-      void registerWindowStatePersistence();
-
-      // Prime the global "what's installed" cache so any view can render
-      // installed-indicators before the user opens the Installed tab.
-      void useInstalledStore.getState().refresh();
+      // Disabled for the bisect: the dotnet probe spawns a child process
+      // (which stalls the parent on Windows) and the installed scan is heavy.
+      // void maybeCheckForUpdates();
+      // if (!dotnetInitialized.current) {
+      //   dotnetInitialized.current = true;
+      //   void invoke("dotnet_init").catch(() => undefined);
+      //   void invoke("plugins_init").catch(() => undefined);
+      // }
+      // void registerWindowStatePersistence();
+      // void useInstalledStore.getState().refresh();
 
       await Promise.all([
         listen<{
@@ -467,7 +446,7 @@ async function syncSteamSession() {
   }
 }
 
-async function maybeCheckForUpdates() {
+export async function maybeCheckForUpdates() {
   if (!inTauri) return;
   const enabled = await tryInvoke<boolean>(
     "config_get",
@@ -509,7 +488,7 @@ async function maybeAutoApply(pubfileid: string) {
   }
 }
 
-async function registerWindowStatePersistence() {
+export async function registerWindowStatePersistence() {
   if (!inTauri) return;
   try {
     const win = getCurrentWindow();
