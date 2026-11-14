@@ -4,104 +4,22 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::sync::Mutex as AsyncMutex;
+
+mod helpers;
 
 use crate::services::download_protocol::{
     classify_progress_line, is_steam_guard_prompt,
 };
+use helpers::{build_depot_cmd, emit_terminal};
 use crate::services::fs_util::{dir_has_files, dir_has_project};
 
-use crate::constants::STEAM_APP_ID;
-
-fn build_depot_cmd(
-    plugin_path: &std::path::Path,
-    pubfileid: &str,
-    username: &str,
-    password: &str,
-    output_dir: &str,
-    dotnet_root: Option<&std::path::PathBuf>,
-) -> Command {
-    let login_id: u32 = rand::random();
-    let mut cmd = Command::new(plugin_path);
-    cmd.args([
-        "-app",
-        STEAM_APP_ID,
-        "-pubfile",
-        pubfileid,
-        "-verify-all",
-        "-username",
-        username,
-        "-password",
-        password,
-        "-remember-password",
-        "-loginid",
-        &login_id.to_string(),
-        "-max-downloads",
-        "32",
-        "-dir",
-    ])
-    .arg(output_dir)
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .kill_on_drop(true);
-
-    if let Some(root) = dotnet_root {
-        cmd.env("DOTNET_ROOT", root);
-    }
-
-    #[cfg(windows)]
-    {
-        cmd.creation_flags(crate::core::platform::CREATE_NO_WINDOW);
-    }
-
-    cmd
-}
-
-
-/// Emit a terminal status for one task and its matching `download://completed`
-/// event.
-///
-/// The cancel, success and fail paths each built a `TaskStatus` and then the
-/// same `DownloadCompleted` event, differing only in phase/text/success. One
-/// helper keeps the two events in lockstep — a caller that forgot the second
-/// emit would leave the frontend waiting forever.
-fn emit_terminal(
-    app: &AppHandle,
-    pubfileid: &str,
-    account: &str,
-    status: String,
-    phase: Phase,
-    progress: Option<f32>,
-    success: bool,
-) {
-    let final_status = TaskStatus {
-        pubfileid: pubfileid.to_string(),
-        status,
-        account: account.to_string(),
-        phase,
-        progress,
-    };
-    app.emit("download://status", &final_status).ok();
-    app.emit(
-        "download://completed",
-        DownloadCompleted {
-            pubfileid: pubfileid.to_string(),
-            success,
-        },
-    )
-    .ok();
-}
-
-
-/// What a single DepotDownloader stdout line tells us about the run.
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskStatus {
