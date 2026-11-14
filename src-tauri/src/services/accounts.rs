@@ -149,19 +149,6 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// Acceptance test for dropping the bundled pool: a single user account
-    /// must satisfy every consumer of credentials — the parser session, the
-    /// download path, and the retry-loop budget.
-    /// Re-signing in must refresh the stored password, not be rejected.
-    ///
-    /// `accounts_set_custom` runs after a successful Steam sign-in. When it
-    /// refused duplicates, a changed password could never be persisted: the
-    /// stale credential on disk made every subsequent auto-login fail, and the
-    /// user saw only "login failed" with no way to recover short of deleting
-    /// the account file.
-    /// The full round-trip the app performs on every restart: save, reopen the
-    /// store from disk, and confirm the credentials come back usable.
-
     /// `steamLoginSecure` must be `{steamid}%7C%7C{access_token}`.
     ///
     /// This exact spelling is what Steam's own front end uses; anything else is
@@ -185,6 +172,9 @@ mod tests {
     }
 
     /// A session must survive the encrypted round-trip, including its tokens.
+    ///
+    /// This is the full round-trip the app performs on every restart: save,
+    /// reopen the store from disk, and confirm the session comes back usable.
     #[test]
     fn session_survives_a_restart() {
         let dir = TempDir::new().unwrap();
@@ -228,6 +218,13 @@ mod tests {
         );
     }
 
+    /// Re-signing in must refresh the stored password, not be rejected.
+    ///
+    /// `accounts_set_custom` runs after a successful Steam sign-in. When it
+    /// refused duplicates, a changed password could never be persisted: the
+    /// stale credential on disk made every subsequent auto-login fail, and the
+    /// user saw only "login failed" with no way to recover short of deleting
+    /// the account file.
     #[test]
     fn re_adding_an_account_updates_the_password() {
         let dir = TempDir::new().unwrap();
@@ -243,6 +240,9 @@ mod tests {
         assert_eq!(mgr.list_custom_usernames().len(), 1);
     }
 
+    /// Acceptance test for dropping the bundled pool: a single user account
+    /// must satisfy every consumer of credentials — the parser session, the
+    /// download path, and the retry-loop budget.
     #[test]
     fn single_account_covers_every_consumer() {
         let dir = TempDir::new().unwrap();

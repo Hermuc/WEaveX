@@ -1160,7 +1160,7 @@ mod tests {
     /// which surface as a corrupted stream rather than a clean error.
     #[test]
     fn spans_overlapping_a_range_are_selected_correctly() {
-        let spans = vec![span(0, 100), span(100, 100), span(200, 100)];
+        let spans = [span(0, 100), span(100, 100), span(200, 100)];
 
         let overlap = |offset: u64, end: u64| -> Vec<usize> {
             spans
