@@ -33,7 +33,7 @@ export default function LegalDialog({
 
   const openNoticeLink = () => {
     void openExternal(
-      "https://github.com/psyattack/WEave/blob/main/NOTICE.md",
+      "https://github.com/Hermuc/WEaveR/blob/main/NOTICE.md",
     );
   };
 

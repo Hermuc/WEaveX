@@ -102,7 +102,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 - **Wallpaper Engine**（已安装）
 - **.NET 运行时 8/9/10**（缺失时自动下载）
 
-安装时，请从 [**GitHub Releases**](https://github.com/psyattack/weave/releases) 下载最新版本：
+安装时，请从 [**GitHub Releases**](https://github.com/Hermuc/WEaveR/releases) 下载最新版本：
 - **安装包（`.exe .msi`）：** 运行安装程序并按提示操作。
 - **便携版（`.zip`）：** 将压缩包解压到磁盘上任意方便的位置，运行 `WEaveR.exe`。
 
@@ -126,8 +126,8 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 ```bash
 # 克隆仓库
-git clone https://github.com/psyattack/WEave.git
-cd WEave
+git clone https://github.com/Hermuc/WEaveR.git
+cd WEaveR
 
 # 安装依赖
 npm install
@@ -201,7 +201,7 @@ npm run bump
 <summary><b>展开结构</b></summary>
 
 ```
-WEave/
+WEaveR/
 ├── src/                              # React 前端
 │   ├── assets/                       # 静态资源（Logo、图标）
 │   ├── components/                   # React 组件
@@ -306,6 +306,6 @@ WEave/
 
 ## 💬 支持
 
-如有问题、疑问或功能建议，请在 [**GitHub**](https://github.com/psyattack/weave/issues) 上提交 issue。
+如有问题、疑问或功能建议，请在 [**GitHub**](https://github.com/Hermuc/WEaveR/issues) 上提交 issue。
 
 ---

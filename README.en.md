@@ -102,7 +102,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 - **Wallpaper Engine** (installed)
 - **.NET Runtime 8/9/10** (auto-downloaded if missing)
 
-To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/weave/releases):
+To install, download the latest release from [**GitHub Releases**](https://github.com/Hermuc/WEaveR/releases):
 - **Installer (`.exe .msi`):** Run the installer and follow the instructions.
 - **Portable version (`.zip`):** Extract the archive to any convenient location on your disk and run `WEaveR.exe`.
 
@@ -126,8 +126,8 @@ To install, download the latest release from [**GitHub Releases**](https://githu
 
 ```bash
 # Clone repository
-git clone https://github.com/psyattack/WEave.git
-cd WEave
+git clone https://github.com/Hermuc/WEaveR.git
+cd WEaveR
 
 # Install dependencies
 npm install
@@ -201,7 +201,7 @@ npm run bump
 <summary><b>View structure</b></summary>
 
 ```
-WEave/
+WEaveR/
 ├── src/                              # React frontend
 │   ├── assets/                       # Static assets (logos, icons)
 │   ├── components/                   # React components
@@ -306,6 +306,6 @@ This application is **not affiliated with or endorsed by** Valve Corporation or 
 
 ## 💬 Support
 
-For issues, questions, or feature requests, please open an issue on [**GitHub**](https://github.com/psyattack/weave/issues).
+For issues, questions, or feature requests, please open an issue on [**GitHub**](https://github.com/Hermuc/WEaveR/issues).
 
 ---

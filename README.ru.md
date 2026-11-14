@@ -102,7 +102,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 - **Wallpaper Engine** (установленный)
 - **.NET Runtime 8/9/10** (загружается автоматически при отсутствии)
 
-Для установки скачайте последний релиз с [**GitHub Releases**](https://github.com/psyattack/weave/releases):
+Для установки скачайте последний релиз с [**GitHub Releases**](https://github.com/Hermuc/WEaveR/releases):
 - **Установщик (`.exe .msi`):** Запустите установщик и следуйте инструкциям на экране.
 - **Портативная версия (`.zip`):** Распакуйте архив в любое удобное место на диске и запустите `WEaveR.exe`.
 
@@ -126,8 +126,8 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/psyattack/WEave.git
-cd WEave
+git clone https://github.com/Hermuc/WEaveR.git
+cd WEaveR
 
 # Установить зависимости
 npm install
@@ -201,7 +201,7 @@ npm run bump
 <summary><b>Просмотр структуры</b></summary>
 
 ```
-WEave/
+WEaveR/
 ├── src/                              # React фронтенд
 │   ├── assets/                       # Статические ресурсы (логотипы, иконки)
 │   ├── components/                   # React компоненты
@@ -306,6 +306,6 @@ WEave/
 
 ## 💬 Поддержка
 
-По вопросам, проблемам или запросам функций открывайте issue на [**GitHub**](https://github.com/psyattack/weave/issues).
+По вопросам, проблемам или запросам функций открывайте issue на [**GitHub**](https://github.com/Hermuc/WEaveR/issues).
 
 ---

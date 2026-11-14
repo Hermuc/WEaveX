@@ -130,7 +130,7 @@ export default function InfoDialog({
         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
           <button
             className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
-            onClick={() => openLink("https://github.com/psyattack/WEave")}
+            onClick={() => openLink("https://github.com/Hermuc/WEaveR")}
           >
             <Github className="size-4" />
             {t("buttons.github")}
@@ -157,7 +157,7 @@ export default function InfoDialog({
           </button>
           <button
             className="hover-shimmer flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm backdrop-blur-md transition-all hover:bg-white/10"
-            onClick={() => openLink("https://github.com/psyattack/WEave/releases")}
+            onClick={() => openLink("https://github.com/Hermuc/WEaveR/releases")}
           >
             <BookOpen className="size-4" />
             {t("buttons.changelog") || "Changelog"}

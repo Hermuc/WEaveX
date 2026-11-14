@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import readline from "readline";
 
-const REPO_URL = "https://github.com/Hermuc/WEaveX";
+const REPO_URL = "https://github.com/Hermuc/WEaveR";
 const authorCache = new Map();
 
 function waitForEnter(query) {

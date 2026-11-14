@@ -95,7 +95,7 @@ export default function UpdateDialog({ open, onOpenChange }: Props) {
                     onClick={() => {
                       const url =
                         info.html_url ||
-                        "https://github.com/psyattack/WEave/releases";
+                        "https://github.com/Hermuc/WEaveR/releases";
                       if (inTauri) openExternal(url);
                     }}
                   >
