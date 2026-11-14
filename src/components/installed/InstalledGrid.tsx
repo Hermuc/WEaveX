@@ -4,6 +4,7 @@ import { InstalledMetadata } from "@/types/workshop";
 import { useAppStore } from "@/stores/app";
 import { motion } from "framer-motion";
 import WallpaperCard from "./WallpaperCard";
+import { computeColumns, GRID_GAP, MIN_COL_WIDTH } from "./gridLayout";
 
 interface InstalledGridProps {
   items: InstalledWallpaper[];
@@ -39,21 +40,19 @@ export default function InstalledGrid({
   const [scrollTop, setScrollTop] = useState(0);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-  const minColWidth = 190;
-  const gap = 12;
+  const gap = GRID_GAP;
 
   const { cols, colWidth, itemHeight, totalRows, totalHeight } = useMemo(() => {
-    const c =
-      dimensions.width === 0
-        ? 4
-        : Math.max(
-            1,
-            Math.floor((dimensions.width + gap) / (minColWidth + gap)),
-          );
-    const cw =
-      dimensions.width === 0
-        ? minColWidth
-        : (dimensions.width - (c - 1) * gap) / c;
+    const measured = computeColumns(dimensions.width, MIN_COL_WIDTH, gap);
+    // `measured === 0` means genuinely unmeasured (hidden container). Fall back
+    // to a sane column count so the grid still renders; the value is replaced
+    // as soon as either `useLayoutEffect` or the ResizeObserver reports a real
+    // width. This also keeps non-layout environments (JSDOM tests) working,
+    // where every element reports zero width.
+    const c = measured === 0 ? 4 : measured;
+    const usableWidth =
+      measured === 0 ? c * MIN_COL_WIDTH + (c - 1) * gap : dimensions.width;
+    const cw = (usableWidth - (c - 1) * gap) / c;
     const ih = cw;
     const tr = Math.ceil(items.length / c);
     const th = tr * ih + (tr > 0 ? (tr - 1) * gap : 0) + 72;
@@ -64,26 +63,44 @@ export default function InstalledGrid({
       totalRows: tr,
       totalHeight: th,
     };
-  }, [dimensions.width, items.length]);
+  }, [dimensions.width, items.length, gap]);
 
   // Measure synchronously, before the browser paints.
   //
   // This used to run inside a plain `useEffect`, which fires *after* paint. The
-  // first frame therefore rendered with `dimensions.width === 0` — the fallback
-  // of 4 columns at `minColWidth` — and only the follow-up render used the real
-  // width. On every visit to the Installed view the cards visibly snapped from
-  // the narrow fallback layout to the correct one.
+  // first frame therefore rendered with `dimensions.width === 0` — a hard-coded
+  // 4-column fallback — and only the follow-up render used the real width, so
+  // the cards visibly snapped to a new layout on every visit.
   //
   // `useLayoutEffect` runs after the DOM is updated but before paint, so the
-  // state update it schedules is folded into the same render and the fallback
-  // frame never reaches the screen.
+  // state update it schedules is folded into the same render and no
+  // intermediate frame reaches the screen.
+  //
+  // CRITICAL: measure the *content box*, exactly like the ResizeObserver below.
+  //
+  // `clientWidth` is the **padding box** width: it includes the container's
+  // `px-4` (32px in total). `ResizeObserver`'s `contentRect.width` is the
+  // **content box** width and excludes it. Using `clientWidth` here made the
+  // first frame believe the container was 32px wider than it is, which was
+  // enough to cross a column breakpoint — the grid briefly showed one extra
+  // column (e.g. 5) and then settled on the correct one (4). Do not "simplify"
+  // this back to `el.clientWidth`.
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const width = el.clientWidth;
-    const height = el.clientHeight;
-    // A hidden container measures 0; leave the fallback in place and let the
-    // ResizeObserver below deliver the real size once it becomes visible.
+    const style = getComputedStyle(el);
+    const padX =
+      (parseFloat(style.paddingLeft) || 0) +
+      (parseFloat(style.paddingRight) || 0);
+    const padY =
+      (parseFloat(style.paddingTop) || 0) +
+      (parseFloat(style.paddingBottom) || 0);
+    // `clientWidth` already excludes the scrollbar, so subtracting only the
+    // padding yields precisely what `contentRect.width` reports.
+    const width = el.clientWidth - padX;
+    const height = el.clientHeight - padY;
+    // A hidden container measures 0; leave the unmeasured state in place and
+    // let the ResizeObserver below deliver the real size once it is visible.
     if (width <= 0 || height <= 0) return;
     setDimensions((prev) =>
       prev.width === width && prev.height === height
@@ -143,6 +160,8 @@ export default function InstalledGrid({
 
   const visibleItems = useMemo(() => {
     if (dimensions.height === 0 || items.length === 0) {
+      // Height is unknown (unmeasured, or a non-layout environment such as
+      // JSDOM). Render a fixed slice so the grid is never empty.
       return items.slice(0, 12).map((item, index) => ({ item, index }));
     }
     const buffer = 2;
@@ -163,7 +182,7 @@ export default function InstalledGrid({
       result.push({ item: items[i], index: i });
     }
     return result;
-  }, [items, scrollTop, dimensions.height, cols, totalRows, itemHeight]);
+  }, [items, scrollTop, dimensions.height, cols, totalRows, itemHeight, gap]);
 
   return (
     <div ref={containerRef} className="relative flex-1 overflow-auto px-4 pt-3 pb-20">
