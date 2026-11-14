@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="src/assets/icon.svg" alt="WEave Logo" width="120" height="120">
+  <img src="src/assets/icon.svg" alt="WEaveR Logo" width="120" height="120">
   
-  # WEave
+  # WEaveR
   
   **用于管理 Wallpaper Engine 的 Steam 创意工坊壁纸的现代桌面应用**
   
@@ -22,7 +22,7 @@
 
 ## 📖 简介
 
-WEave 是一款基于 Tauri 2 与 React 构建的强大 Wallpaper Engine 创意工坊管理器。无需打开 Steam 或浏览器，即可发现、下载并管理创意工坊里的海量壁纸。
+WEaveR 是一款基于 Tauri 2 与 React 构建的强大 Wallpaper Engine 创意工坊管理器。无需打开 Steam 或浏览器，即可发现、下载并管理创意工坊里的海量壁纸。
 
 https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
@@ -104,10 +104,10 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 安装时，请从 [**GitHub Releases**](https://github.com/psyattack/weave/releases) 下载最新版本：
 - **安装包（`.exe .msi`）：** 运行安装程序并按提示操作。
-- **便携版（`.zip`）：** 将压缩包解压到磁盘上任意方便的位置，运行 `WEave.exe`。
+- **便携版（`.zip`）：** 将压缩包解压到磁盘上任意方便的位置，运行 `WEaveR.exe`。
 
 > [!NOTE]
-> 首次登录时，若系统中未检测到 .NET 运行时/SDK 8/9/10，WEave 会自动下载附加工具以及便携版 .NET 运行时 9.0.17。
+> 首次登录时，若系统中未检测到 .NET 运行时/SDK 8/9/10，WEaveR 会自动下载附加工具以及便携版 .NET 运行时 9.0.17。
 
 ---
 

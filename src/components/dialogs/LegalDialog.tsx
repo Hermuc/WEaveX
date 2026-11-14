@@ -119,7 +119,7 @@ export default function LegalDialog({
           {activeTab === "license" && (
             <div className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-sm">
               <h3 className="text-base font-semibold">MIT License</h3>
-              <p className="text-muted">Copyright © 2026 WEave</p>
+              <p className="text-muted">Copyright © 2026 WEaveR</p>
               <p>
                 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
               </p>

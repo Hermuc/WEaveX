@@ -361,7 +361,7 @@ export default {
     description:
       "This application allows you to easily download and manage Wallpaper Engine wallpapers from Steam Workshop.",
     developed: "Developed with ❤ free",
-    app_full_name: "WEave",
+    app_full_name: "WEaveR",
     version_label: "Version",
     faq_title: "Frequently Asked Questions",
   },
@@ -378,20 +378,20 @@ export default {
     license_tab: "License",
     no_affiliation_title: "No Affiliation",
     no_affiliation_text:
-      "WEave is an independent project and is not affiliated with, endorsed by, or sponsored by Valve Corporation or Kristjan Skutta (creator of Wallpaper Engine).",
+      "WEaveR is an independent project and is not affiliated with, endorsed by, or sponsored by Valve Corporation or Kristjan Skutta (creator of Wallpaper Engine).",
     use_at_risk_title: "Use at Your Own Risk",
     use_at_risk_text:
       'This software is provided "as is" without warranty of any kind. The developers are not responsible for any damage, data loss, or other issues that may arise from using this software.',
     steam_responsibility_title: "Steam Account Responsibility",
     steam_responsibility_text:
-      "Users are solely responsible for complying with Steam's Terms of Service and Subscriber Agreement. WEave does not guarantee against Steam account restrictions or bans resulting from its use.",
+      "Users are solely responsible for complying with Steam's Terms of Service and Subscriber Agreement. WEaveR does not guarantee against Steam account restrictions or bans resulting from its use.",
     workshop_content_title: "Third-party Content",
     workshop_content_text:
-      "WEave does not control, endorse, or assume responsibility for any content downloaded from the Steam Workshop. Users are solely responsible for the content they download and use.",
+      "WEaveR does not control, endorse, or assume responsibility for any content downloaded from the Steam Workshop. Users are solely responsible for the content they download and use.",
     third_party_notice_text: "For full third-party notices and component licenses, see",
     accept_terms: "I understand and accept these terms",
     accept_explanation:
-      "By using WEave, you acknowledge that you have read and understood this disclaimer.",
+      "By using WEaveR, you acknowledge that you have read and understood this disclaimer.",
   },
   filters: {
     local_sort: {
@@ -623,7 +623,7 @@ export default {
   },
   faq: {
     login_issues_q: "Steam login error occurs in the app",
-    login_issues_a: "If you do not need 18+ content, you can ignore this issue.\n\nIf you need 18+ content, try these in order:\n\n1) Simply restart the program\n2) Go to Settings -> Account and re-login the Steam account you added\n3) Close WEave, open the data folder (the \"Open Data folder\" button in the \"About\" window), delete the «SteamWebView» folder (this resets the built-in browser cache), then restart the program.\n\nIf the problem persists, the account you added likely has restricted access to 18+ content. Check that 18+ content restrictions are not enabled on that account in your Steam account settings.",
+    login_issues_a: "If you do not need 18+ content, you can ignore this issue.\n\nIf you need 18+ content, try these in order:\n\n1) Simply restart the program\n2) Go to Settings -> Account and re-login the Steam account you added\n3) Close WEaveR, open the data folder (the \"Open Data folder\" button in the \"About\" window), delete the «SteamWebView» folder (this resets the built-in browser cache), then restart the program.\n\nIf the problem persists, the account you added likely has restricted access to 18+ content. Check that 18+ content restrictions are not enabled on that account in your Steam account settings.",
     extract_q: "Why does the \"Extract\" button not work for some downloaded wallpapers?",
     extract_a: "Not all wallpapers in the Workshop are full-fledged projects (with a project.json file). There are video wallpapers (MP4) or web wallpapers (HTML). They are already ready to use, and there is no need (and technically impossible) to unpack them as Wallpaper Engine projects.",
     storage_q: "Where are downloaded wallpapers stored?",

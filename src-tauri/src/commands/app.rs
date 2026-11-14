@@ -20,7 +20,7 @@ pub struct AppInfo {
 pub fn app_get_info() -> AppInfo {
     AppInfo {
         version: APP_VERSION.into(),
-        name: "WEave".into(),
+        name: "WEaveR".into(),
     }
 }
 

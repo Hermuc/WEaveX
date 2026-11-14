@@ -579,7 +579,7 @@ pub async fn steam_oauth_begin(
     let _ = state.accounts.add_user_account(&user, &password);
 
     let flow = LoginBuilder::new()
-        .device_name("WEave")
+        .device_name("WEaveR")
         .with_credentials(&user, &password)
         .begin()
         .await

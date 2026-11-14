@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="src/assets/icon.svg" alt="WEave Logo" width="120" height="120">
+  <img src="src/assets/icon.svg" alt="WEaveR Logo" width="120" height="120">
   
-  # WEave
+  # WEaveR
   
   **Современное десктопное приложение для управления обоями Steam Workshop для Wallpaper Engine**
   
@@ -22,7 +22,7 @@
 
 ## 📖 Обзор
 
-WEave — мощный менеджер Wallpaper Engine Workshop, созданный на Tauri 2 и React. Открывайте, загружайте и управляйте тысячами обоев из Steam Workshop без необходимости открывать Steam или браузер.
+WEaveR — мощный менеджер Wallpaper Engine Workshop, созданный на Tauri 2 и React. Открывайте, загружайте и управляйте тысячами обоев из Steam Workshop без необходимости открывать Steam или браузер.
 
 https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
@@ -104,10 +104,10 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 Для установки скачайте последний релиз с [**GitHub Releases**](https://github.com/psyattack/weave/releases):
 - **Установщик (`.exe .msi`):** Запустите установщик и следуйте инструкциям на экране.
-- **Портативная версия (`.zip`):** Распакуйте архив в любое удобное место на диске и запустите `WEave.exe`.
+- **Портативная версия (`.zip`):** Распакуйте архив в любое удобное место на диске и запустите `WEaveR.exe`.
 
 > [!NOTE]
-> При первом входе WEave автоматически загрузит дополнительные инструменты и портативную версию .NET Runtime 9.0.17, если в системе не обнаружен .NET Runtime/SDK 8/9/10.
+> При первом входе WEaveR автоматически загрузит дополнительные инструменты и портативную версию .NET Runtime 9.0.17, если в системе не обнаружен .NET Runtime/SDK 8/9/10.
 
 ---
 

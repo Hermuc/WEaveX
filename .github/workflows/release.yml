@@ -52,7 +52,7 @@ jobs:
           # 1. Installer (.exe from NSIS)
           $nsisExe = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
           if ($nsisExe) {
-              $exeTarget = "$distDir/WEave-v$ver-Setup-x64.exe"
+              $exeTarget = "$distDir/WEaveR-v$ver-Setup-x64.exe"
               Copy-Item $nsisExe.FullName $exeTarget
               Write-Host "Created $exeTarget"
           }
@@ -60,15 +60,15 @@ jobs:
           # 2. Installer (.msi)
           $msiFile = Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
           if ($msiFile) {
-              $msiTarget = "$distDir/WEave-v$ver-Setup-x64.msi"
+              $msiTarget = "$distDir/WEaveR-v$ver-Setup-x64.msi"
               Copy-Item $msiFile.FullName $msiTarget
               Write-Host "Created $msiTarget"
           }
 
           # 3. Portable Zip (compress standalone executable)
-          $exePath = "src-tauri/target/release/WEave.exe"
+          $exePath = "src-tauri/target/release/WEaveR.exe"
           if (Test-Path $exePath) {
-              $zipTarget = "$distDir/WEave-v$ver-Portable-x64.zip"
+              $zipTarget = "$distDir/WEaveR-v$ver-Portable-x64.zip"
               Compress-Archive -Path $exePath -DestinationPath $zipTarget -Force
               Write-Host "Created $zipTarget"
           }
@@ -97,7 +97,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: WEave ${{ github.ref_name }}
+          name: WEaveR ${{ github.ref_name }}
           body_path: release_notes.md
           files: dist_artifacts/*
         env:

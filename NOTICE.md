@@ -1,6 +1,6 @@
 # Third-Party Notices & Licenses
 
-This document contains attribution notices and license details for third-party software, tools, and direct dependencies used in **WEave**.
+This document contains attribution notices and license details for third-party software, tools, and direct dependencies used in **WEaveR**.
 
 ---
 

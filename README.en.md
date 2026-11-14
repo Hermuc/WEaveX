@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="src/assets/icon.svg" alt="WEave Logo" width="120" height="120">
+  <img src="src/assets/icon.svg" alt="WEaveR Logo" width="120" height="120">
   
-  # WEave
+  # WEaveR
   
   **Modern desktop application for managing Steam Workshop wallpapers for Wallpaper Engine**
   
@@ -22,7 +22,7 @@
 
 ## 📖 Overview
 
-WEave is a powerful Wallpaper Engine Workshop Manager built with Tauri 2 and React. Discover, download, and manage thousands of wallpapers from Steam Workshop without opening Steam or a web browser.
+WEaveR is a powerful Wallpaper Engine Workshop Manager built with Tauri 2 and React. Discover, download, and manage thousands of wallpapers from Steam Workshop without opening Steam or a web browser.
 
 https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
@@ -104,10 +104,10 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/weave/releases):
 - **Installer (`.exe .msi`):** Run the installer and follow the instructions.
-- **Portable version (`.zip`):** Extract the archive to any convenient location on your disk and run `WEave.exe`.
+- **Portable version (`.zip`):** Extract the archive to any convenient location on your disk and run `WEaveR.exe`.
 
 > [!NOTE]
-> When you first log in, WEave will automatically download additional tools and the portable version of .NET Runtime 9.0.17 if .NET Runtime/SDK 8/9/10 is not detected on your system.
+> When you first log in, WEaveR will automatically download additional tools and the portable version of .NET Runtime 9.0.17 if .NET Runtime/SDK 8/9/10 is not detected on your system.
 
 ---
 

@@ -594,7 +594,7 @@ fn store_layout(item_id: u64, info: &VideoStreamInfo) {
 pub async fn login(username: &str, password: &str) -> anyhow::Result<SteamClient<LoggedIn>> {
     if let Some(tok) = steamroom_client::steam_creds::extract_token(username) {
         match LoginBuilder::new()
-            .device_name("WEave")
+            .device_name("WEaveR")
             .with_refresh_token(&tok.account_name, &tok.refresh_token)
             .login()
             .await
@@ -608,7 +608,7 @@ pub async fn login(username: &str, password: &str) -> anyhow::Result<SteamClient
     }
     if let Some(tok) = load_cached_token(username) {
         match LoginBuilder::new()
-            .device_name("WEave")
+            .device_name("WEaveR")
             .with_refresh_token(username, &tok)
             .login()
             .await
@@ -621,7 +621,7 @@ pub async fn login(username: &str, password: &str) -> anyhow::Result<SteamClient
         }
     }
     let flow = LoginBuilder::new()
-        .device_name("WEave")
+        .device_name("WEaveR")
         .with_credentials(username, password)
         .begin()
         .await

@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import readline from "readline";
 
-const REPO_URL = "https://github.com/psyattack/WEave";
+const REPO_URL = "https://github.com/Hermuc/WEaveX";
 const authorCache = new Map();
 
 function waitForEnter(query) {
@@ -52,7 +52,7 @@ async function resolveAuthor(hash, authorName, authorEmail) {
     if (repoMatch && repoMatch[1]) {
       const repo = repoMatch[1];
       const res = await fetch(`https://api.github.com/repos/${repo}/commits/${hash}`, {
-        headers: { "User-Agent": "Node-WEave-Release" },
+        headers: { "User-Agent": "Node-WEaveR-Release" },
       });
       if (res.ok) {
         const data = await res.json();

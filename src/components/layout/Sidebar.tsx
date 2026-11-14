@@ -61,7 +61,7 @@ export default function Sidebar({ current, onChange }: SidebarProps) {
         </div>
         {!collapsed && (
           <div className="flex flex-col">
-            <span className="text-sm font-semibold tracking-tight">WEave</span>
+            <span className="text-sm font-semibold tracking-tight">WEaveR</span>
             <span className="text-[11px] text-subtle">Wallpaper Engine</span>
           </div>
         )}

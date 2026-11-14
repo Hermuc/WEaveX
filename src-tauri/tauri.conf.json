@@ -1,5 +1,5 @@
 {
-  "productName": "WEave",
+  "productName": "WEaveR",
   "version": "4.13.0",
   "identifier": "WEave",
   "build": {
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "WEave",
+        "title": "WEaveR",
         "width": 1200,
         "height": 700,
         "minWidth": 960,

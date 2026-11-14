@@ -442,7 +442,7 @@ impl SteamWebview {
             sleep(Duration::from_millis(400)).await;
         }
         log::warn!("[steam-webview] logout could not clear steamLoginSecure");
-        Err("Could not sign out of the current Steam session. Close WEave, delete the SteamWebView folder under %LOCALAPPDATA%\\WEave, then reopen and try again."
+        Err("Could not sign out of the current Steam session. Close WEaveR, delete the SteamWebView folder under %LOCALAPPDATA%\\WEave, then reopen and try again."
             .to_string())
     }
     /// Pull all `steamcommunity.com` cookies from the webview and load them

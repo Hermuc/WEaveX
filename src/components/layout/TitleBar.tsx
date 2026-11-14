@@ -88,7 +88,7 @@ export default function TitleBar() {
           data-tauri-drag-region
           className="text-xs font-medium tracking-tight opacity-80"
         >
-          WEave
+          WEaveR
         </span>
       </div>
       <div data-tauri-drag-region className="flex-1" />

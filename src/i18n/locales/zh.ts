@@ -359,7 +359,7 @@ export default {
     description:
       "本应用让你轻松地从 Steam 创意工坊下载并管理 Wallpaper Engine 壁纸。",
     developed: "用心开发，免费提供 ❤",
-    app_full_name: "WEave",
+    app_full_name: "WEaveR",
     version_label: "版本",
     faq_title: "常见问题",
   },
@@ -376,20 +376,20 @@ export default {
     license_tab: "许可证",
     no_affiliation_title: "无关联声明",
     no_affiliation_text:
-      "WEave 是独立项目，与 Valve 公司或 Kristjan Skutta（Wallpaper Engine 的创作者）无任何关联、背书或赞助关系。",
+      "WEaveR 是独立项目，与 Valve 公司或 Kristjan Skutta（Wallpaper Engine 的创作者）无任何关联、背书或赞助关系。",
     use_at_risk_title: "自行承担风险",
     use_at_risk_text:
       "本软件按“现状”提供，不附带任何形式的担保。开发者不对因使用本软件而产生的任何损害、数据丢失或其他问题负责。",
     steam_responsibility_title: "Steam 账户责任",
     steam_responsibility_text:
-      "用户须自行负责遵守 Steam 的服务条款和用户协议。WEave 不保证不会因使用本软件而导致 Steam 账户受限或封禁。",
+      "用户须自行负责遵守 Steam 的服务条款和用户协议。WEaveR 不保证不会因使用本软件而导致 Steam 账户受限或封禁。",
     workshop_content_title: "第三方内容",
     workshop_content_text:
-      "WEave 不控制、不背书也不对从 Steam 创意工坊下载的任何内容承担责任。用户须对所下载和使用的内容自行负责。",
+      "WEaveR 不控制、不背书也不对从 Steam 创意工坊下载的任何内容承担责任。用户须对所下载和使用的内容自行负责。",
     third_party_notice_text: "完整的第三方声明与组件许可证，请参见",
     accept_terms: "我已理解并接受这些条款",
     accept_explanation:
-      "使用 WEave 即表示你确认已阅读并理解本免责声明。",
+      "使用 WEaveR 即表示你确认已阅读并理解本免责声明。",
   },
   filters: {
     local_sort: {
@@ -621,7 +621,7 @@ export default {
   },
   faq: {
     login_issues_q: "应用内出现 Steam 登录错误",
-    login_issues_a: "如果你不需要 18+ 内容，可以忽略此问题。\n\n如果你需要 18+ 内容，请依次尝试：\n\n1) 直接重启程序\n2) 进入「设置 → 账户」，重新登录你添加的 Steam 账号\n3) 关闭 WEave 后，打开数据文件夹（「关于」窗口中的「打开数据文件夹」按钮），删除「SteamWebView」文件夹（这会重置内置浏览器缓存），然后重启程序。\n\n如果问题长期存在，通常是该账号本身对 18+ 内容的访问受限。请确认你添加的账号在你的 Steam 账户设置中没有开启 18+ 内容限制。",
+    login_issues_a: "如果你不需要 18+ 内容，可以忽略此问题。\n\n如果你需要 18+ 内容，请依次尝试：\n\n1) 直接重启程序\n2) 进入「设置 → 账户」，重新登录你添加的 Steam 账号\n3) 关闭 WEaveR 后，打开数据文件夹（「关于」窗口中的「打开数据文件夹」按钮），删除「SteamWebView」文件夹（这会重置内置浏览器缓存），然后重启程序。\n\n如果问题长期存在，通常是该账号本身对 18+ 内容的访问受限。请确认你添加的账号在你的 Steam 账户设置中没有开启 18+ 内容限制。",
     extract_q: "为什么某些已下载的壁纸“解包”按钮不可用？",
     extract_a: "并非创意工坊中的所有壁纸都是完整的项目（带有 project.json 文件）。还有视频壁纸（MP4）或网页壁纸（HTML）。它们已经可以直接使用，无需（技术上也无法）作为 Wallpaper Engine 项目解包。",
     storage_q: "下载的壁纸保存在哪里？",
