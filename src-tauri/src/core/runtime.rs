@@ -233,46 +233,11 @@ async fn download_and_extract_runtime(
         Some(0.0),
     );
     log::info!("Extracting to {}...", dotnet_dir.display());
-    extract_zip(&zip_path, &dotnet_dir)?;
+    crate::core::archive::extract_zip(&zip_path, &dotnet_dir, None)?;
 
     // Delete the ZIP file
     std::fs::remove_file(&zip_path)?;
     log::info!("Portable .NET Runtime installed successfully");
-
-    Ok(())
-}
-
-/// Extracts a ZIP archive to the target directory.
-fn extract_zip(zip_path: &std::path::Path, target_dir: &std::path::Path) -> anyhow::Result<()> {
-    let file = std::fs::File::open(zip_path)?;
-    let mut archive = zip::ZipArchive::new(file)?;
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let outpath = match file.enclosed_name() {
-            Some(path) => target_dir.join(path),
-            None => continue,
-        };
-
-        if file.name().ends_with('/') {
-            std::fs::create_dir_all(&outpath)?;
-        } else {
-            if let Some(p) = outpath.parent() {
-                std::fs::create_dir_all(p)?;
-            }
-            let mut outfile = std::fs::File::create(&outpath)?;
-            std::io::copy(&mut file, &mut outfile)?;
-        }
-
-        // Set permissions on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Some(mode) = file.unix_mode() {
-                std::fs::set_permissions(&outpath, std::fs::Permissions::from_mode(mode))?;
-            }
-        }
-    }
 
     Ok(())
 }

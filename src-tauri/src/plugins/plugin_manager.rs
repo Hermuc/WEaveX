@@ -197,7 +197,7 @@ async fn download_and_extract_plugin(
     log::info!("Extracting {} to {}...", plugin.name, plugin_dir.display());
 
     if plugin.is_zip {
-        extract_zip(&archive_path, &plugin_dir, plugin.strip_prefix)?;
+        crate::core::archive::extract_zip(&archive_path, &plugin_dir, plugin.strip_prefix)?;
     } else {
         extract_rar(&archive_path, &plugin_dir, plugin.strip_prefix)?;
     }
@@ -218,63 +218,6 @@ async fn download_and_extract_plugin(
     Ok(())
 }
 
-fn extract_zip(
-    zip_path: &std::path::Path,
-    target_dir: &std::path::Path,
-    strip_prefix: Option<&str>,
-) -> anyhow::Result<()> {
-    let file = std::fs::File::open(zip_path)?;
-    let mut archive = zip::ZipArchive::new(file)?;
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let raw_path = file
-            .enclosed_name()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default();
-
-        // Strip the prefix if configured
-        let rel_path = if let Some(prefix) = strip_prefix {
-            match raw_path.strip_prefix(prefix) {
-                Ok(stripped) => stripped.to_path_buf(),
-                Err(_) => {
-                    // Skip entries that are parent directories of the prefix
-                    // e.g. "Release/" for prefix "Release/net9.0/"
-                    continue;
-                }
-            }
-        } else {
-            raw_path
-        };
-
-        // Skip empty paths (the prefix directory entry itself)
-        if rel_path.as_os_str().is_empty() {
-            continue;
-        }
-
-        let outpath = target_dir.join(&rel_path);
-
-        if file.name().ends_with('/') || rel_path.to_string_lossy().ends_with('/') {
-            std::fs::create_dir_all(&outpath)?;
-        } else {
-            if let Some(p) = outpath.parent() {
-                std::fs::create_dir_all(p)?;
-            }
-            let mut outfile = std::fs::File::create(&outpath)?;
-            std::io::copy(&mut file, &mut outfile)?;
-        }
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Some(mode) = file.unix_mode() {
-                std::fs::set_permissions(&outpath, std::fs::Permissions::from_mode(mode))?;
-            }
-        }
-    }
-
-    Ok(())
-}
 
 fn extract_rar(
     rar_path: &std::path::Path,
