@@ -14,8 +14,8 @@ pub use core::errors;
 pub use core::logger;
 pub use core::runtime;
 
-pub use plugins::plugin_manager;
-pub use plugins::plugin_paths;
+// `plugins` is deliberately not re-exported at the crate root: callers use the
+// full `crate::plugins::…` path, which keeps the layer visible at the call site.
 
 pub use services::accounts;
 pub use services::download;

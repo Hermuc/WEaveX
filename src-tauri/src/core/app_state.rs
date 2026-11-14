@@ -12,7 +12,7 @@ use crate::config::{MetadataService, SettingsService};
 use crate::download::DownloadManager;
 use crate::extract::ExtractManager;
 use crate::i18n::I18nService;
-use crate::plugin_manager;
+use crate::plugins::plugin_manager;
 use crate::we_client::WallpaperEngineClient;
 use crate::workshop::webview::SteamWebview;
 use crate::workshop::WorkshopClient;

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::command;
 
 use crate::commands::{map_err, AppStateHandle};
-use crate::plugin_paths;
+use crate::plugins::plugin_paths;
 
 #[command]
 pub async fn download_start(

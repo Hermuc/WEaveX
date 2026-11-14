@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::commands::AppStateHandle;
-use crate::plugin_paths;
+use crate::plugins::plugin_paths;
 
 type ChildHandle = Arc<AsyncMutex<Option<Child>>>;
 static AUTH_HANDLES: Lazy<Mutex<HashMap<String, ChildHandle>>> =
