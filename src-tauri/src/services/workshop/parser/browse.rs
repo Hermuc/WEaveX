@@ -83,10 +83,10 @@ pub fn parse_browse(html: &str, current_page: u32) -> WorkshopPage {
 ///
 ///   `doc.querySelectorAll('.tmIrUKf-Mh8-, .sDK5fonBQMA-, .workshopItem, .workshopItemCollection')`
 fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
-    let container_sel = &*selectors::BROWSE_CONTAINER;
-    let link_sel = &*selectors::BROWSE_LINK;
-    let title_sel = &*selectors::BROWSE_TITLE;
-    let img_sel = &*selectors::IMG;
+    let container_sel = &selectors::BROWSE_CONTAINER;
+    let link_sel = &selectors::BROWSE_LINK;
+    let title_sel = &selectors::BROWSE_TITLE;
+    let img_sel = &selectors::IMG;
     // Author chip selectors. On the Collections browse tiles Steam ships
     // just `<span class="workshopItemAuthorName">NAME</span>` (preceded by
     // a loose "Collection by" text node — no link, no URL). On regular
@@ -94,14 +94,14 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
     // class="workshop_author_link" href="…">NAME</a></div>`. We try the
     // linked form first so `author_url` is populated when available, then
     // fall back to plain text.
-    let author_link_sel = &*selectors::BROWSE_AUTHOR_LINK;
-    let author_text_sel = &*selectors::BROWSE_AUTHOR_TEXT;
-    let author_re = &*selectors::BROWSE_AUTHOR_PREFIX;
+    let author_link_sel = &selectors::BROWSE_AUTHOR_LINK;
+    let author_text_sel = &selectors::BROWSE_AUTHOR_TEXT;
+    let author_re = &selectors::BROWSE_AUTHOR_PREFIX;
 
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    for tile in doc.select(&container_sel) {
+    for tile in doc.select(container_sel) {
         // The tile itself may be the link (collection tiles use
         // `<a class="workshopItemCollection" href="…filedetails?id=…">`).
         let tile_name = tile.value().name();
@@ -111,7 +111,7 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
             None
         };
         let href = tile_href.or_else(|| {
-            tile.select(&link_sel)
+            tile.select(link_sel)
                 .next()
                 .and_then(|l| l.value().attr("href"))
         });
@@ -130,11 +130,11 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
 
         // Title — explicit element first, then fall back to the link text /
         // image alt attribute (used when the tile is a collection card).
-        if let Some(t) = tile.select(&title_sel).next() {
+        if let Some(t) = tile.select(title_sel).next() {
             item.title = inner_text(t);
         }
         if item.title.is_empty() {
-            if let Some(link) = tile.select(&link_sel).next() {
+            if let Some(link) = tile.select(link_sel).next() {
                 let lt = inner_text(link);
                 if !lt.starts_with("By ") {
                     item.title = lt;
@@ -142,7 +142,7 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
             }
         }
         if item.title.is_empty() {
-            if let Some(img) = tile.select(&img_sel).next() {
+            if let Some(img) = tile.select(img_sel).next() {
                 if let Some(alt) = img.value().attr("alt") {
                     item.title = alt.trim().to_string();
                 }
@@ -150,7 +150,7 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
         }
 
         // Preview image
-        if let Some(img) = tile.select(&img_sel).next() {
+        if let Some(img) = tile.select(img_sel).next() {
             if let Some(src) = img
                 .value()
                 .attr("src")
@@ -163,11 +163,11 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
         // Author — prefer the anchor form (gets us URL for click-through),
         // fall back to the plain `.workshopItemAuthorName` span for
         // collection tiles where Steam doesn't render a link at all.
-        if let Some(a) = tile.select(&author_link_sel).next() {
+        if let Some(a) = tile.select(author_link_sel).next() {
             let raw = inner_text(a);
             item.author = author_re.replace(&raw, "").trim().to_string();
             item.author_url = a.value().attr("href").unwrap_or("").to_string();
-        } else if let Some(span) = tile.select(&author_text_sel).next() {
+        } else if let Some(span) = tile.select(author_text_sel).next() {
             let raw = inner_text(span);
             item.author = author_re.replace(&raw, "").trim().to_string();
         }
@@ -182,11 +182,11 @@ fn parse_browse_html(doc: &Html) -> Vec<WorkshopItem> {
 /// matches anything. Walks every `a[href*="filedetails"]` link, merges
 /// duplicates by pubfileid, and pairs nearby `By NAME` author links.
 fn parse_browse_loose(doc: &Html, html: &str) -> Vec<WorkshopItem> {
-    let link_sel = &*selectors::BROWSE_LINK_EXACT;
-    let img_sel = &*selectors::IMG;
+    let link_sel = &selectors::BROWSE_LINK_EXACT;
+    let img_sel = &selectors::IMG;
     let mut by_id: HashMap<String, WorkshopItem> = HashMap::new();
 
-    for a in doc.select(&link_sel) {
+    for a in doc.select(link_sel) {
         let Some(href) = a.value().attr("href") else {
             continue;
         };
@@ -202,7 +202,7 @@ fn parse_browse_loose(doc: &Html, html: &str) -> Vec<WorkshopItem> {
             entry.title = txt;
         }
         if entry.preview_url.is_empty() {
-            if let Some(img) = a.select(&img_sel).next() {
+            if let Some(img) = a.select(img_sel).next() {
                 if let Some(src) = img
                     .value()
                     .attr("src")
@@ -224,8 +224,8 @@ fn parse_browse_loose(doc: &Html, html: &str) -> Vec<WorkshopItem> {
     // Pair `By NAME` links with the nearest preceding filedetails link.
     // Collection tiles link to `myworkshopcollections` instead of
     // `myworkshopfiles` so both have to be matched here.
-    let author_re = &*selectors::BROWSE_AUTHOR_HREF;
-    let id_re = &*selectors::FILEDETAILS_ID;
+    let author_re = &selectors::BROWSE_AUTHOR_HREF;
+    let id_re = &selectors::FILEDETAILS_ID;
     let id_positions: Vec<(String, usize)> = id_re
         .captures_iter(html)
         .map(|c| (c[1].to_string(), c.get(0).unwrap().start()))
@@ -269,7 +269,7 @@ fn parse_browse_ssr(html: &str) -> Vec<WorkshopItem> {
         return Vec::new();
     }
     // Pull out the queries blob: `queries":"…escaped JSON…"`
-    let re = &*selectors::SSR_QUERIES;
+    let re = &selectors::SSR_QUERIES;
     let Some(cap) = re.captures(html) else {
         return Vec::new();
     };
@@ -420,14 +420,14 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     // Priority 1: look for the ellipsis pattern followed by the last number in the pagination.
     // Pattern: <div>...</div><div class="...Panel" tabindex="0" role="button">1,000</div>
     // IMPORTANT: look for the LAST match, because there may be several ellipses.
-    let re_ellipsis_last = &*selectors::PAGE_ELLIPSIS_LAST;
+    let re_ellipsis_last = &selectors::PAGE_ELLIPSIS_LAST;
 
     // Find ALL matches and take the last one.
     let last_match = re_ellipsis_last.captures_iter(html).last();
     if let Some(cap) = last_match {
         if let Ok(max) = cap[1].replace(',', "").parse::<u32>() {
             // Try to determine the total number of items from the text.
-            let re_total = &*selectors::PAGE_TOTAL_SHORT;
+            let re_total = &selectors::PAGE_TOTAL_SHORT;
             let total_items = re_total
                 .captures(html)
                 .and_then(|cap| cap[1].replace([',', '.', ' '], "").parse::<u64>().ok())
@@ -441,7 +441,7 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
     }
 
     // Priority 2: extract from the text "Showing X-Y of Z".
-    let re_total = &*selectors::PAGE_SHOWING;
+    let re_total = &selectors::PAGE_SHOWING;
     if let Some(cap) = re_total.captures(html) {
         let start: u64 = cap[1].replace([',', '.', ' '], "").parse().unwrap_or(0);
         let end: u64 = cap[2].replace([',', '.', ' '], "").parse().unwrap_or(0);
@@ -454,9 +454,9 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
 
     // Priority 3: search the pagination controls by CSS selector (legacy method).
     {
-        let paging_sel = &*selectors::PAGE_CONTROLS;
+        let paging_sel = &selectors::PAGE_CONTROLS;
         let mut max_page = 0;
-        for el in doc.select(&paging_sel) {
+        for el in doc.select(paging_sel) {
             let text = el.text().collect::<String>().trim().to_string();
             if let Ok(p) = text.parse::<u32>() {
                 if p > max_page {
@@ -472,8 +472,8 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
 
     // Priority 4: search the pagination links with a regular expression (legacy method, fallback).
     // Improved regular expression that tolerates any attribute order.
-    let re_pages_1 = &*selectors::PAGE_LINK;
-    let re_pages_2 = &*selectors::PAGE_CURRENT;
+    let re_pages_1 = &selectors::PAGE_LINK;
+    let re_pages_2 = &selectors::PAGE_CURRENT;
 
     let max_page_1 = re_pages_1
         .captures_iter(html)

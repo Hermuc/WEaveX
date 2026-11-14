@@ -110,10 +110,10 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
             }
         }
     }
-    let stat_left_sel = &*selectors::STAT_LEFT;
-    let stat_right_sel = &*selectors::STAT_RIGHT;
-    let lefts: Vec<_> = doc.select(&stat_left_sel).collect();
-    let rights: Vec<_> = doc.select(&stat_right_sel).collect();
+    let stat_left_sel = &selectors::STAT_LEFT;
+    let stat_right_sel = &selectors::STAT_RIGHT;
+    let lefts: Vec<_> = doc.select(stat_left_sel).collect();
+    let rights: Vec<_> = doc.select(stat_right_sel).collect();
     for (l, r) in lefts.iter().zip(rights.iter()) {
         let left = text(*l);
         let right = text(*r);
@@ -138,11 +138,11 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
         }
     }
     // Tag groups (.workshopTags > .workshopTagsTitle + <a> links).
-    let tag_block_sel = &*selectors::TAG_BLOCK;
-    let tag_title_sel = &*selectors::TAG_TITLE;
-    let tag_link_sel = &*selectors::ANCHOR;
-    for td in doc.select(&tag_block_sel) {
-        let Some(title_el) = td.select(&tag_title_sel).next() else {
+    let tag_block_sel = &selectors::TAG_BLOCK;
+    let tag_title_sel = &selectors::TAG_TITLE;
+    let tag_link_sel = &selectors::ANCHOR;
+    for td in doc.select(tag_block_sel) {
+        let Some(title_el) = td.select(tag_title_sel).next() else {
             continue;
         };
         let mut key = text(title_el);
@@ -154,7 +154,7 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
             continue;
         }
         let values: Vec<String> = td
-            .select(&tag_link_sel)
+            .select(tag_link_sel)
             .map(text)
             .filter(|v| !v.is_empty())
             .collect();
@@ -165,16 +165,16 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
     c.info = Value::Object(info);
 
     // -------- items in this collection (with their own author chips) ----
-    let item_sel = &*selectors::COLLECTION_ITEM;
-    let link_sel = &*selectors::BROWSE_LINK;
-    let preview_sel = &*selectors::COLLECTION_PREVIEW;
-    let img_sel = &*selectors::IMG;
-    let title_sel = &*selectors::WORKSHOP_TITLE;
-    let author_sel = &*selectors::WORKSHOP_AUTHOR_ANCHOR;
+    let item_sel = &selectors::COLLECTION_ITEM;
+    let link_sel = &selectors::BROWSE_LINK;
+    let preview_sel = &selectors::COLLECTION_PREVIEW;
+    let img_sel = &selectors::IMG;
+    let title_sel = &selectors::WORKSHOP_TITLE;
+    let author_sel = &selectors::WORKSHOP_AUTHOR_ANCHOR;
 
     let mut seen = std::collections::HashSet::new();
-    for e in doc.select(&item_sel) {
-        let Some(link) = e.select(&link_sel).next() else {
+    for e in doc.select(item_sel) {
+        let Some(link) = e.select(link_sel).next() else {
             continue;
         };
         let Some(id) = extract_pubfileid(link.value().attr("href").unwrap_or("")) else {
@@ -183,13 +183,13 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
         if id == collection_id || !seen.insert(id.clone()) {
             continue;
         }
-        let title = e.select(&title_sel).next().map(text).unwrap_or_default();
+        let title = e.select(title_sel).next().map(text).unwrap_or_default();
         let preview = e
-            .select(&preview_sel)
+            .select(preview_sel)
             .next()
             .and_then(|i| i.value().attr("src"))
             .or_else(|| {
-                e.select(&img_sel)
+                e.select(img_sel)
                     .next()
                     .and_then(|i| i.value().attr("src"))
             })
@@ -197,7 +197,7 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
             .to_string();
         let mut author = String::new();
         let mut author_url = String::new();
-        if let Some(a) = e.select(&author_sel).next() {
+        if let Some(a) = e.select(author_sel).next() {
             author = text(a);
             if let Some(href) = a.value().attr("href") {
                 author_url = href.to_string();
@@ -214,11 +214,11 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
     }
 
     // -------- related collections sidebar ------------------------------
-    let related_sel = &*selectors::COLLECTION_RELATED;
-    let count_sel = &*selectors::COLLECTION_COUNT;
-    let digits_re = &*selectors::DIGITS;
-    for r in doc.select(&related_sel) {
-        let Some(link) = r.select(&link_sel).next() else {
+    let related_sel = &selectors::COLLECTION_RELATED;
+    let count_sel = &selectors::COLLECTION_COUNT;
+    let digits_re = &selectors::DIGITS;
+    for r in doc.select(related_sel) {
+        let Some(link) = r.select(link_sel).next() else {
             continue;
         };
         let Some(id) = extract_pubfileid(link.value().attr("href").unwrap_or("")) else {
@@ -227,15 +227,15 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
         if id == collection_id || !seen.insert(id.clone()) {
             continue;
         }
-        let title = r.select(&title_sel).next().map(text).unwrap_or_default();
+        let title = r.select(title_sel).next().map(text).unwrap_or_default();
         let preview = r
-            .select(&preview_sel)
+            .select(preview_sel)
             .next()
             .and_then(|i| i.value().attr("src"))
             .unwrap_or("")
             .to_string();
         let mut item_count: u32 = 0;
-        if let Some(ce) = r.select(&count_sel).next() {
+        if let Some(ce) = r.select(count_sel).next() {
             let raw = text(ce);
             if let Some(m) = digits_re.captures(&raw) {
                 if let Ok(n) = m[1].parse::<u32>() {

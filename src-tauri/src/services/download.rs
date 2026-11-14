@@ -389,7 +389,7 @@ impl DownloadManager {
                             // Any line at all means the child is alive; reset the
                             // idle clock so a slow-but-progressing run is not killed.
                             last_activity = tokio::time::Instant::now();
-                                                        if let Some(line) = msg.strip_prefix("OUT:") {
+                            if let Some(line) = msg.strip_prefix("OUT:") {
                                 let v = classify_progress_line(line, &output_dir_string);
                                 if v.marks_started {
                                     download_started = true;

@@ -81,10 +81,10 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     }
 
     let stat_keys = ["Posted", "Posted:", "Updated", "Updated:"];
-    let labels = &*selectors::STAT_LEFT;
-    let values = &*selectors::STAT_RIGHT;
-    let lbls: Vec<_> = doc.select(&labels).map(text).collect();
-    let vals: Vec<_> = doc.select(&values).map(text).collect();
+    let labels = &selectors::STAT_LEFT;
+    let values = &selectors::STAT_RIGHT;
+    let lbls: Vec<_> = doc.select(labels).map(text).collect();
+    let vals: Vec<_> = doc.select(values).map(text).collect();
     for (i, lbl) in lbls.iter().enumerate() {
         if stat_keys.iter().any(|k| {
             lbl.trim_end_matches(':')
@@ -99,15 +99,15 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
         }
     }
 
-    let rating_sel = &*selectors::RATING_IMG;
-    if let Some(img) = doc.select(&rating_sel).next() {
+    let rating_sel = &selectors::RATING_IMG;
+    if let Some(img) = doc.select(rating_sel).next() {
         if let Some(src) = img.value().attr("src") {
             item.rating_star_file = src.to_string();
         }
     }
 
-    let num_sel = &*selectors::NUM_RATINGS;
-    if let Some(el) = doc.select(&num_sel).next() {
+    let num_sel = &selectors::NUM_RATINGS;
+    if let Some(el) = doc.select(num_sel).next() {
         let raw = text(el);
         let digits: String = raw
             .chars()
@@ -120,10 +120,10 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     // <a>Tag1</a>, <a>Tag2</a></div>` — we extract both the category label
     // (e.g. "Type", "Genre", "Resolution") and the list of values so the UI
     // can render them grouped like the Python app does.
-    let tag_block_sel = &*selectors::TAG_BLOCK;
-    let tag_link_sel = &*selectors::ANCHOR;
+    let tag_block_sel = &selectors::TAG_BLOCK;
+    let tag_link_sel = &selectors::ANCHOR;
     let mut tags = Vec::new();
-    for block in doc.select(&tag_block_sel) {
+    for block in doc.select(tag_block_sel) {
         // The category label is the leading text node before the <a> tags.
         // We pick the first text node that contains *real* content, not
         // just punctuation or whitespace — Steam sometimes renders a
@@ -144,7 +144,7 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
                 break;
             }
         }
-        for a in block.select(&tag_link_sel) {
+        for a in block.select(tag_link_sel) {
             let value = text(a);
             if value.is_empty() {
                 continue;
@@ -164,12 +164,12 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
     //     <div class="parentCollectionTitle">Title</div>
     //     <div class="parentCollectionNumChildren">42 items</div>
     //   </div>
-    let pc_sel = &*selectors::PARENT_COLLECTION;
-    let title_sel = &*selectors::PARENT_COLLECTION_TITLE;
-    let count_sel = &*selectors::PARENT_COLLECTION_COUNT;
-    let id_re = &*selectors::ID_EQ_DIGITS;
-    let num_re = &*selectors::DIGITS;
-    for pc in doc.select(&pc_sel) {
+    let pc_sel = &selectors::PARENT_COLLECTION;
+    let title_sel = &selectors::PARENT_COLLECTION_TITLE;
+    let count_sel = &selectors::PARENT_COLLECTION_COUNT;
+    let id_re = &selectors::ID_EQ_DIGITS;
+    let num_re = &selectors::DIGITS;
+    for pc in doc.select(pc_sel) {
         let onclick = pc
             .value()
             .attr("onClick")
@@ -179,9 +179,9 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
             continue;
         };
         let id = cap[1].to_string();
-        let title = pc.select(&title_sel).next().map(text).unwrap_or_default();
+        let title = pc.select(title_sel).next().map(text).unwrap_or_default();
         let count = pc
-            .select(&count_sel)
+            .select(count_sel)
             .next()
             .map(|e| text(e))
             .and_then(|s| num_re.captures(&s).map(|c| c[1].to_string()))
