@@ -173,7 +173,7 @@ describe("Cross-Feature Combination E2E Tests (Tier 3)", () => {
     expect(document.activeElement).toBe(extractBtn);
   });
 
-  it("T3.5 (F1 + F6) Staggered grid reload: applying new search filter updates staggered card rendering delays", async () => {
+  it("T3.5 (F1 + F6) Filtered grid reload: applying a search filter updates the rendered card set", async () => {
     render(<InstalledView />);
     const searchInput = await screen.findByPlaceholderText(/search/i);
     await userEvent.type(searchInput, "Nature");

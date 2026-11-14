@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useMemo } from "react";
 import { InstalledWallpaper } from "@/types/workshop";
 import { InstalledMetadata } from "@/types/workshop";
 import { useAppStore } from "@/stores/app";
@@ -66,6 +66,32 @@ export default function InstalledGrid({
     };
   }, [dimensions.width, items.length]);
 
+  // Measure synchronously, before the browser paints.
+  //
+  // This used to run inside a plain `useEffect`, which fires *after* paint. The
+  // first frame therefore rendered with `dimensions.width === 0` — the fallback
+  // of 4 columns at `minColWidth` — and only the follow-up render used the real
+  // width. On every visit to the Installed view the cards visibly snapped from
+  // the narrow fallback layout to the correct one.
+  //
+  // `useLayoutEffect` runs after the DOM is updated but before paint, so the
+  // state update it schedules is folded into the same render and the fallback
+  // frame never reaches the screen.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const width = el.clientWidth;
+    const height = el.clientHeight;
+    // A hidden container measures 0; leave the fallback in place and let the
+    // ResizeObserver below deliver the real size once it becomes visible.
+    if (width <= 0 || height <= 0) return;
+    setDimensions((prev) =>
+      prev.width === width && prev.height === height
+        ? prev
+        : { width, height },
+    );
+  }, []);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -75,25 +101,25 @@ export default function InstalledGrid({
     };
 
     const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
       setDimensions((prev) => {
-        // Ignore minor height changes (like toolbars expanding/collapsing)
-        // to prevent massive layout thrashing and stuttering.
-        if (
-          prev.width === entry.contentRect.width &&
-          Math.abs(prev.height - entry.contentRect.height) < 150
-        ) {
-          return prev;
-        }
-        return {
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
-        };
+        // Any width change matters — it changes the column count and every
+        // card's size, so it must never be filtered out. Height changes are
+        // mostly the toolbar expanding or collapsing, and reacting to those
+        // would thrash the whole grid, so those keep a tolerance.
+        //
+        // Comparing width exactly (rather than with a tolerance) is safe here
+        // because `contentRect` reports fractions consistently; it is the
+        // *height* that jitters as rows resize.
+        const widthChanged = prev.width !== width;
+        const heightChanged = Math.abs(prev.height - height) >= 150;
+        if (!widthChanged && !heightChanged) return prev;
+        return { width, height };
       });
     });
 
     el.addEventListener("scroll", handleScroll, { passive: true });
     ro.observe(el);
-    setDimensions({ width: el.clientWidth, height: el.clientHeight });
 
     return () => {
       el.removeEventListener("scroll", handleScroll);
@@ -171,7 +197,6 @@ export default function InstalledGrid({
             >
               <WallpaperCard
                 item={item}
-                index={index}
                 isSelected={
                   selected?.pubfileid === item.pubfileid && !selectionMode
                 }
@@ -200,7 +225,6 @@ export default function InstalledGrid({
             >
               <WallpaperCard
                 item={item}
-                index={index}
                 isSelected={
                   selected?.pubfileid === item.pubfileid && !selectionMode
                 }

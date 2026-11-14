@@ -19,7 +19,6 @@ interface WallpaperCardProps {
   onDelete: (item: InstalledWallpaper) => void;
   onOpenFolder: (item: InstalledWallpaper) => void;
   onCopyId: (item: InstalledWallpaper) => void;
-  index?: number;
 }
 
 export default function WallpaperCard({
@@ -35,7 +34,6 @@ export default function WallpaperCard({
   onDelete,
   onOpenFolder,
   onCopyId,
-  index = 0,
 }: WallpaperCardProps) {
   const { t } = useTranslation();
   const enableLayoutAnimations = useAppStore((s) => s.enableLayoutAnimations);
@@ -78,15 +76,14 @@ export default function WallpaperCard({
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      style={{
-        // Stagger the entry animation so a freshly loaded grid fades in as a
-        // wave instead of all at once. This was previously a no-op: the delay
-        // was set but no animation was ever applied.
-        animationDelay: `${Math.min(index, 24) * 0.04}s`,
-      }}
       className={cn(
         "card card-hover group relative flex cursor-pointer flex-col overflow-hidden",
-        "animate-fade-in",
+        // No per-card fade-in. The stagger made a freshly loaded grid fade in
+        // as a wave, which took nearly a second for 35 cards and — combined
+        // with the size measurement above settling on the same tick — read as
+        // a messy half-rendered state rather than as an animation. `ViewWrap`
+        // already fades the whole view in, which gives the same sense of
+        // arrival without animating every card individually.
         enableLayoutAnimations
           ? "transition-all duration-300 ease-out"
           : "transition-[border-color,box-shadow] duration-200",

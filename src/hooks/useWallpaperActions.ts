@@ -53,6 +53,11 @@ export function useWallpaperActions() {
     const cachedItems = Object.values(cachedStore.byId);
     if (!opts?.force && cachedStore.ready && cachedItems.length > 0) {
       setItems(cachedItems);
+      // Seed the metadata in the same tick as the list. Without this the first
+      // frame rendered "—" for every author and only filled them in once
+      // `metadata_get_all` resolved below — the visible half-loaded state that
+      // made the Installed view look broken for a moment on each visit.
+      setMetaMap(cachedStore.metaMap);
       setLoading(false);
       hasLoadedRef.current = true;
     } else if (!hasLoadedRef.current) {
