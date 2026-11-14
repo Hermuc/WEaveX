@@ -158,6 +158,8 @@ impl AppState {
                         .install_session_cookies(&session.steam_id, &session.access_token)
                         .is_ok();
                     if installed {
+                        // Wait for the webview to pick up the injected cookies
+                        // before declaring the saved session restored.
                         tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
                         restored = true;
                         log::info!("[startup] installed saved session for {acct}");

@@ -467,6 +467,8 @@ impl DownloadManager {
                     pubfileid,
                     current_index
                 );
+                // Back off briefly before the next account attempt so a
+                // rate-limited login does not hammer Steam.
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             }
         });

@@ -256,6 +256,8 @@ pub async fn steam_qr_login_finalize(
     w.eval("window.location.href = 'https://steamcommunity.com/'")
         .map_err(|e| e.to_string())?;
 
+    // Let the new community page finish loading before reading cookies back;
+    // the navigation above is asynchronous from the webview's point of view.
     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
     let _ = state.steam_webview.sync_cookies().await;
@@ -427,6 +429,8 @@ pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<
     "#;
     w.eval(script).ok();
 
+    // The injected probe writes its result into location.hash; give the browser
+    // a tick to run it before we read the URL back.
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     if let Ok(url) = w.url() {
@@ -514,6 +518,8 @@ async fn complete_oauth_login(
         .steam_webview
         .install_session_cookies(&steam_id, &tokens.access_token)
         .map_err(|e| format!("install cookies: {e}"))?;
+    // Give the webview a moment to apply the new cookies before syncing them
+    // into the reqwest jar and querying Steam.
     tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
     let _ = state.steam_webview.sync_cookies().await;
     state.workshop.clear_caches();
