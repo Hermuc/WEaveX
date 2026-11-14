@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod download;
+pub mod download_protocol;
 pub mod extract;
 pub mod fs_util;
 pub mod i18n;
