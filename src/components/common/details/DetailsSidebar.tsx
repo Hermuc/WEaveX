@@ -181,7 +181,7 @@ export default function DetailsSidebar(props: DetailsSidebarProps) {
             <PreviewImage
               key={meta.preview}
               src={meta.preview}
-              alt={meta.title}
+              alt=""
               className="aspect-square w-full object-cover"
             />
           </div>

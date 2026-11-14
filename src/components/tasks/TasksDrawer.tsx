@@ -268,7 +268,7 @@ function TaskPreview({
         <PreviewImage
           key={src}
           src={src}
-          alt={pubfileid}
+          alt=""
           className="size-full object-cover"
         />
       ) : null}

@@ -223,7 +223,7 @@ export default function WorkshopCard({
           <PreviewImage
             key={item.preview_url}
             src={item.preview_url}
-            alt={item.title}
+            alt=""
             className={cn(
               "size-full scale-[1.02] rounded-[inherit] object-cover transition-all",
               "duration-700 ease-out group-hover:scale-[1.15] group-hover:brightness-75",

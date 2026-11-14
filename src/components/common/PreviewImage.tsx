@@ -7,6 +7,18 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   src?: string;
+  /**
+   * Accepted for call-site compatibility but deliberately NOT forwarded to the
+   * <img> element.
+   *
+   * A browser renders an <img>'s `alt` text *in place of the picture* until
+   * the source has loaded and decoded. Every card in the grid passed the
+   * wallpaper title here, so the title was painted at the image position in
+   * the browser's default font for as long as the local preview took to
+   * resolve -- a second, oversized copy of the title floating over the
+   * artwork. The title is already rendered as a real heading in the card, so
+   * the preview is decorative and its accessible name should be empty.
+   */
   alt?: string;
   className?: string;
   fallback?: React.ReactNode;
@@ -38,7 +50,6 @@ function isAnimated(src: string): boolean {
 
 export default function PreviewImage({
   src,
-  alt,
   className,
   fallback,
   fit = "cover",
@@ -49,11 +60,16 @@ export default function PreviewImage({
   );
   const [failed, setFailed] = useState(false);
   const [visible, setVisible] = useState(false);
+  // True once the current source has actually decoded. Until then the <img>
+  // stays fully transparent, so nothing -- pixels, alt text, or a broken-image
+  // glyph -- can show through while the file is loading.
+  const [loaded, setLoaded] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   if (src !== prevSrc) {
     setPrevSrc(src);
     setFailed(false);
+    setLoaded(false);
     setResolved(toDisplaySrc(src));
   }
 
@@ -110,15 +126,21 @@ export default function PreviewImage({
     <img
       ref={imgRef}
       src={showSrc}
-      alt={alt ?? ""}
+      // Always empty on purpose; see the `alt` note in Props above.
+      alt=""
       draggable={false}
       loading="lazy"
       decoding="async"
+      onLoad={() => setLoaded(true)}
       onError={() => {
         setFailed(true);
       }}
+      // Opacity, not `animate-fade-in`: the animation used to run while the
+      // browser was still showing the alt text, so the fade itself is what made
+      // the stray title visible. Opaque only once the image has decoded.
+      style={{ opacity: loaded ? 1 : 0, transition: "opacity 160ms ease-out" }}
       className={cn(
-        "size-full animate-fade-in",
+        "size-full",
         fit === "cover" ? "object-cover" : "object-contain",
         !showSrc && "bg-surface-sunken",
         className,

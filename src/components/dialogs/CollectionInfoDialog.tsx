@@ -72,7 +72,7 @@ export default function CollectionInfoDialog({
             <PreviewImage
               key={collection.preview_url}
               src={collection.preview_url}
-              alt={collection.title}
+              alt=""
               className="aspect-video w-full object-cover"
             />
           </div>

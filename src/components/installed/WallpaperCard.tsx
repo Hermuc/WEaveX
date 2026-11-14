@@ -95,7 +95,7 @@ export default function WallpaperCard({
         <PreviewImage
           key={item.preview}
           src={item.preview}
-          alt={item.title}
+          alt=""
           className="size-full scale-[1.02] rounded-[inherit] object-cover transition-all duration-700 ease-out group-hover:scale-[1.15] group-hover:brightness-75"
         />
 
