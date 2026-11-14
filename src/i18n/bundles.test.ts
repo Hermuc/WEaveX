@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import i18n from "./index";
 import en from "./locales/en";
 import zh from "./locales/zh";
+import { DEFAULT_LANGUAGE, LOCALES, SUPPORTED_LANGUAGES } from "./languages";
 
 type Tree = { [k: string]: string | Tree };
 
@@ -43,6 +44,34 @@ describe("i18n resource bundles", () => {
         translated !== i18n.getResource("zh", "translation", key);
     });
     expect(notChinese).toEqual([]);
+  });
+
+  /**
+   * The backend keeps its own copy of the language list in
+   * `src-tauri/src/services/i18n.rs`, and its comment says to keep it in sync.
+   * A Rust test cannot read this file, so the two lists are checked from here
+   * instead: everything the UI advertises must have a real bundle, and the
+   * default must be one of them.
+   */
+  it("keeps the locale registry and the bundles in agreement", () => {
+    const codes = LOCALES.map((l) => l.code);
+
+    // Every registered locale has a translation resource.
+    const resources = i18n.options.resources ?? {};
+    for (const code of codes) {
+      expect(Object.keys(resources), `missing bundle for ${code}`).toContain(code);
+    }
+
+    // No bundle is shipped without being registered (a locale that exists but
+    // cannot be selected is just dead weight).
+    const bundled = Object.keys(resources).filter((c) => c !== "dev");
+    expect([...bundled].sort()).toEqual([...codes].sort());
+
+    // The picker is derived from the registry, not hand-maintained.
+    expect(SUPPORTED_LANGUAGES.map((l) => l.code)).toEqual(codes);
+
+    // The default has to be selectable.
+    expect(codes).toContain(DEFAULT_LANGUAGE);
   });
 
   it("switches between en and zh at runtime", async () => {
