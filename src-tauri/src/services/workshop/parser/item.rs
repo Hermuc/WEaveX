@@ -200,3 +200,57 @@ pub fn parse_item_details(html: &str, pubfileid: &str) -> WorkshopItem {
 
     item
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_title_and_description() {
+        let html = r#"<html><body>
+            <div class="workshopItemTitle">My Scene</div>
+            <div class="workshopItemDescription">A nice wallpaper.</div>
+        </body></html>"#;
+        let item = parse_item_details(html, "42");
+        assert_eq!(item.pubfileid, "42");
+        assert_eq!(item.title, "My Scene");
+        assert_eq!(item.description, "A nice wallpaper.");
+    }
+
+    #[test]
+    fn falls_back_to_the_title_tag() {
+        let html = r#"<html><head><title>Steam Workshop::Cool Thing</title></head>
+            <body></body></html>"#;
+        let item = parse_item_details(html, "7");
+        assert_eq!(item.title, "Cool Thing");
+    }
+
+    #[test]
+    fn truncates_an_overlong_description() {
+        let long = "x".repeat(1500);
+        let html = format!(
+            r#"<html><body><div class="workshopItemTitle">T</div>
+            <div class="workshopItemDescription">{long}</div></body></html>"#
+        );
+        let item = parse_item_details(&html, "1");
+        assert_eq!(item.description.chars().count(), 1000);
+    }
+
+    #[test]
+    fn picks_the_first_preview_image() {
+        let html = r#"<html><body>
+            <img id="previewImageMain" src="https://example.com/hero.jpg">
+        </body></html>"#;
+        let item = parse_item_details(html, "9");
+        assert_eq!(item.preview_url, "https://example.com/hero.jpg");
+    }
+
+    #[test]
+    fn missing_fields_default_cleanly() {
+        let item = parse_item_details("<html><body></body></html>", "5");
+        assert_eq!(item.pubfileid, "5");
+        assert!(item.title.is_empty());
+        assert!(item.preview_url.is_empty());
+    }
+}
+

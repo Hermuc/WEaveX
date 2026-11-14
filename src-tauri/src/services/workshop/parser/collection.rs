@@ -264,3 +264,49 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
 
     c
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_title_and_preview() {
+        let html = r#"<html><body>
+            <div class="workshopItemTitle">My Collection</div>
+            <img class="workshopItemPreviewImage" src="https://example.com/c.jpg">
+        </body></html>"#;
+        let c = parse_collection_contents(html, "999");
+        assert_eq!(c.collection_id, "999");
+        assert_eq!(c.title, "My Collection");
+        assert_eq!(c.preview_url, "https://example.com/c.jpg");
+    }
+
+    #[test]
+    fn prefers_the_collection_background_image() {
+        let html = r#"<html><body>
+            <img class="collectionBackgroundImage" src="https://example.com/bg.jpg">
+            <img class="workshopItemPreviewImage" src="https://example.com/other.jpg">
+        </body></html>"#;
+        let c = parse_collection_contents(html, "1");
+        assert_eq!(c.preview_url, "https://example.com/bg.jpg");
+    }
+
+    #[test]
+    fn parses_the_author_link() {
+        let html = r#"<html><body>
+            <div class="workshopItemAuthorName"><a href="https://steamcommunity.com/id/me">Me</a></div>
+        </body></html>"#;
+        let c = parse_collection_contents(html, "2");
+        assert_eq!(c.author, "Me");
+        assert_eq!(c.author_url, "https://steamcommunity.com/id/me");
+    }
+
+    #[test]
+    fn empty_html_yields_defaults() {
+        let c = parse_collection_contents("<html></html>", "3");
+        assert_eq!(c.collection_id, "3");
+        assert!(c.title.is_empty());
+        assert!(c.items.is_empty());
+    }
+}
+
