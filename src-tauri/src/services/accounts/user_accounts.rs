@@ -238,3 +238,25 @@ fn save_accounts(
     out.extend_from_slice(&ct);
     std::fs::write(path, out).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steam_login_secure_joins_with_the_encoded_pipe() {
+        assert_eq!(
+            StoredSteamSession::steam_login_secure("76561198000000000", "abc123"),
+            "76561198000000000%7C%7Cabc123"
+        );
+    }
+
+    #[test]
+    fn steam_login_secure_keeps_the_token_verbatim() {
+        // The token is opaque base64-ish text; it must not be altered.
+        let tok = "eyJhbGciOiJIUzI1NiJ9.payload.signature";
+        let out = StoredSteamSession::steam_login_secure("1", tok);
+        assert!(out.ends_with(tok));
+        assert!(out.contains("%7C%7C"));
+    }
+}
