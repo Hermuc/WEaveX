@@ -127,19 +127,18 @@ export function useBootstrap() {
       // settles. Kept fire-and-forget so it never blocks the rest of boot.
       void syncSteamSession();
 
-      // Reveal the main window only after the first frame has actually been
-      // painted.
+      // Reveal the main window once the first paint is done.
       //
-      // This used to fire here, before `ready` was committed, so the window
-      // became visible while React was still mounting: a real 403ms gap on
-      // this machine, during which WebView2 had an empty surface and the user
-      // saw a translucent rectangle where the UI should be. Waiting two
-      // animation frames is what guarantees a paint has completed — one frame
-      // only guarantees the DOM was updated.
+      // This used to fire before `ready` was committed, so the window became
+      // visible while React was still mounting and WebView2 had an empty
+      // surface — the translucent rectangle users saw on every launch.
       //
-      // `ready` is set above (`useAppStore.setState`), so by the time these
-      // frames run the first real view is on screen; the window therefore
-      // appears already painted instead of blank-then-filled.
+      // Do NOT use requestAnimationFrame here. The window starts hidden
+      // (`visible: false`) and a hidden WebView does not run animation
+      // frames, so a rAF-based reveal never executes and the app appears not
+      // to start at all. A timer always runs; `ready` is already committed
+      // above it, so by the time it fires the first view has been rendered
+      // and the browser has had a chance to paint it.
       const revealWindow = () => {
         void invoke("app_restore_window_geometry")
           .then(() => invoke("app_show_main_window"))
@@ -147,9 +146,7 @@ export function useBootstrap() {
             void invoke("app_show_main_window").catch(() => undefined);
           });
       };
-      requestAnimationFrame(() => {
-        requestAnimationFrame(revealWindow);
-      });
+      window.setTimeout(revealWindow, 50);
 
       // Auto-check for updates on startup if enabled.
       void maybeCheckForUpdates();

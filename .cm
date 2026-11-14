@@ -1,0 +1,13 @@
+fix(startup): use a timer instead of rAF to reveal the window
+
+The previous commit revealed the main window from a double
+requestAnimationFrame. That never fires while the window is hidden, and the
+main window starts with `visible: false` — so the reveal callback was never
+scheduled, `app_show_main_window` was never called, and the app appeared not
+to start at all.
+
+A timer has no such precondition. `ready` is committed before it is armed,
+so the first view is already rendered when the window is finally shown.
+
+Verified by launching the built binary and checking the window directly:
+Visible=True, 1518x885, process responding.
