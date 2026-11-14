@@ -7,6 +7,14 @@ use tauri::Emitter;
 
 use crate::services::steam_auth::jwt_subject;
 
+/// Let the community page load before reading cookies back.
+const COMMUNITY_NAV_SETTLE: std::time::Duration = std::time::Duration::from_millis(2000);
+/// Give the webview a moment to apply freshly written cookies.
+const COOKIE_APPLY_WAIT: std::time::Duration = std::time::Duration::from_millis(1200);
+/// Let an injected eval run before reading its URL-fragment result.
+const EVAL_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+
+
 /// Just opens the parser webview window without starting any login-polling loop.
 /// Safe to call when already logged in — will not fire "steam-login-success".
 #[tauri::command]
@@ -256,7 +264,7 @@ pub async fn steam_qr_login_finalize(
 
     // Let the new community page finish loading before reading cookies back;
     // the navigation above is asynchronous from the webview's point of view.
-    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+    tokio::time::sleep(COMMUNITY_NAV_SETTLE).await;
 
     let _ = state.steam_webview.sync_cookies().await;
     state.workshop.clear_caches();
@@ -361,7 +369,7 @@ pub async fn steam_restore_session(
         .map_err(|e| format!("install cookies: {e}"))?;
 
     // Give the webview a moment, then confirm with Steam itself.
-    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    tokio::time::sleep(COOKIE_APPLY_WAIT).await;
     let _ = state.steam_webview.sync_cookies().await;
     state.workshop.clear_caches();
 
@@ -429,7 +437,7 @@ pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<
 
     // The injected probe writes its result into location.hash; give the browser
     // a tick to run it before we read the URL back.
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    tokio::time::sleep(EVAL_SETTLE).await;
 
     if let Ok(url) = w.url() {
         if let Some(fragment) = url.fragment() {

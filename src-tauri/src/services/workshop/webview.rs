@@ -41,6 +41,34 @@ const STEAM_LOGIN_URL: &str =
     "https://store.steampowered.com/login/?redir=workshop%2Fbrowse%2F%3Fappid%3D431960";
 const STEAM_HOME_URL: &str = "https://steamcommunity.com/workshop/browse/?appid=431960";
 
+// Timing constants for the Steam login flow. Each is a separate named value
+// rather than a literal buried in a loop: the numbers differ because the
+// waits are for different events (a page paint, a form render, a cookie
+// arriving), and naming them says which event each one waits for.
+/// Let WebView2 flush its cookie store after a logout wipe.
+const LOGOUT_FLUSH_WAIT: Duration = Duration::from_millis(1500);
+/// Poll interval while waiting for the login form to render.
+const FORM_RENDER_POLL: Duration = Duration::from_millis(500);
+/// Settle time after an eval that checks for the form.
+const FORM_CHECK_SETTLE: Duration = Duration::from_millis(250);
+/// Wait after a navigation that failed to land on the form.
+const NAV_RETRY_WAIT: Duration = Duration::from_millis(800);
+/// Poll interval while the credential form paints (30 ticks ~= 18s).
+const FORM_PAINT_POLL: Duration = Duration::from_millis(600);
+/// Time allowed for the login document to paint after navigation.
+const LOGIN_PAGE_PAINT_WAIT: Duration = Duration::from_millis(3000);
+/// Pause between form-submit attempts.
+const SUBMIT_RETRY_WAIT: Duration = Duration::from_millis(800);
+/// Poll interval while waiting for the auth cookie (40 ticks ~= 40s).
+const AUTH_COOKIE_POLL: Duration = Duration::from_millis(1000);
+/// Wait for the community page to settle before re-checking the session.
+const COMMUNITY_PAGE_SETTLE: Duration = Duration::from_millis(1500);
+/// Poll interval while the community page loads (30 ticks ~= 12s).
+const COMMUNITY_LOAD_POLL: Duration = Duration::from_millis(400);
+/// Let the window paint before it is shown to the user.
+const WINDOW_SHOW_SETTLE: Duration = Duration::from_millis(600);
+
+
 pub struct SteamWebview {
     app: AppHandle,
     data_dir: PathBuf,
@@ -446,7 +474,7 @@ impl SteamWebview {
         // is not enough to declare success: when the session cookie was already
         // absent (but the page still held a Family View / parser state) the loop
         // would exit on the first tick before the wipe had any effect.
-        sleep(Duration::from_millis(1500)).await;
+        sleep(LOGOUT_FLUSH_WAIT).await;
         if self.wait_for_login(false, 12, 400).await {
             log::info!("[steam-webview] logout confirmed");
             return Ok(());
@@ -587,7 +615,7 @@ impl SteamWebview {
         // become usable again, and only then navigate. Each navigation is
         // followed by its own wait-for-form loop.
         for _ in 0..40 {
-            sleep(Duration::from_millis(500)).await;
+            sleep(FORM_RENDER_POLL).await;
             if w.url().is_ok() && w.eval("1").is_ok() {
                 break;
             }
@@ -596,7 +624,7 @@ impl SteamWebview {
         for _ in 0..6 {
             // Already on a page with the form? Don't navigate again.
             if w.eval(probe).is_ok() {
-                sleep(Duration::from_millis(250)).await;
+                sleep(FORM_CHECK_SETTLE).await;
                 if Self::read_form_flag(&w) {
                     return Ok(true);
                 }
@@ -604,16 +632,16 @@ impl SteamWebview {
             if w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
                 .is_err()
             {
-                sleep(Duration::from_millis(800)).await;
+                sleep(NAV_RETRY_WAIT).await;
                 continue;
             }
             // Up to ~18s per attempt for the credential form to render.
             for _ in 0..30 {
-                sleep(Duration::from_millis(600)).await;
+                sleep(FORM_PAINT_POLL).await;
                 if w.eval(probe).is_err() {
                     continue;
                 }
-                sleep(Duration::from_millis(250)).await;
+                sleep(FORM_CHECK_SETTLE).await;
                 if Self::read_form_flag(&w) {
                     return Ok(true);
                 }
@@ -683,7 +711,7 @@ impl SteamWebview {
         // Navigate to the login page and give the document time to paint.
         w.eval(format!("window.location.href = {:?}", STEAM_LOGIN_URL))
             .map_err(|e| e.to_string())?;
-        sleep(Duration::from_millis(3000)).await;
+        sleep(LOGIN_PAGE_PAINT_WAIT).await;
         let landed = w.url().map(|u| u.to_string()).unwrap_or_default();
         log::info!(
             "[login-flow] navigated; url_host_has_login={}",
@@ -701,7 +729,7 @@ impl SteamWebview {
         for _ in 0..6 {
             w.eval(&script).map_err(|e| e.to_string())?;
             submitted += 1;
-            sleep(Duration::from_millis(800)).await;
+            sleep(SUBMIT_RETRY_WAIT).await;
             // The script writes its outcome into the URL fragment because
             // `eval` cannot return a value. Without this, "no password field",
             // "no username field" and "clicked the button" were indistinguishable
@@ -729,12 +757,12 @@ impl SteamWebview {
         let page_probe = build_page_probe_script();
         let mut last_page = String::new();
         for tick in 0..40 {
-            sleep(Duration::from_millis(1000)).await;
+            sleep(AUTH_COOKIE_POLL).await;
             // Sample the page state every few seconds: whatever Steam rendered
             // after the submit is the only clue to *why* no cookie appeared.
             if tick % 3 == 0 {
                 let _ = w.eval(page_probe);
-                sleep(Duration::from_millis(250)).await;
+                sleep(FORM_CHECK_SETTLE).await;
                 if let Ok(u) = w.url() {
                     if let Some(f) = u.fragment() {
                         if f.starts_with("WE_PAGE:") {
@@ -751,7 +779,7 @@ impl SteamWebview {
                 // Navigate to a plain Workshop page so any further state
                 // (age-gate, community country) is picked up.
                 let _ = w.eval(format!("window.location.href = {:?}", STEAM_HOME_URL));
-                sleep(Duration::from_millis(1500)).await;
+                sleep(COMMUNITY_PAGE_SETTLE).await;
                 return Ok(true);
             }
         }
@@ -804,7 +832,7 @@ impl SteamWebview {
         }
         let _ = w.eval(format!("window.location.href = {:?}", STEAM_HOME_URL));
         for _ in 0..30 {
-            sleep(Duration::from_millis(400)).await;
+            sleep(COMMUNITY_LOAD_POLL).await;
             if self.is_logged_in_inner() {
                 return;
             }
@@ -853,7 +881,7 @@ impl SteamWebview {
             Self::restore_on_screen(&w);
             let _ = w.show();
             let _ = w.set_focus();
-            sleep(Duration::from_millis(600)).await;
+            sleep(WINDOW_SHOW_SETTLE).await;
         }
 
         // 2. Drop any stale session (Family View lock, bundled parser account…)
@@ -878,7 +906,7 @@ impl SteamWebview {
                 if w.eval(&script).is_err() {
                     break;
                 }
-                sleep(Duration::from_millis(800)).await;
+                sleep(SUBMIT_RETRY_WAIT).await;
                 if self.is_logged_in_inner() {
                     return Ok(true);
                 }

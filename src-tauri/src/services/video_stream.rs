@@ -31,6 +31,11 @@ use steamroom::generated;
 /// Wallpaper Engine's Steam app id.
 pub const WE_APP_ID: u32 = 431960;
 
+/// Poll interval while another task is fetching a chunk.
+const CACHE_SPIN_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+/// Backoff before retrying a manifest download on another endpoint.
+const MANIFEST_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// One contiguous byte range of the video, backed by one chunk.
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct ChunkSpan {
@@ -249,7 +254,7 @@ impl ResolvedVideo {
             }
             // Someone else is already fetching it; wait a beat and re-check the
             // cache. Bounded so a stuck fetcher cannot hang the reader forever.
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(CACHE_SPIN_WAIT).await;
         }
 
         let span = match self.info.spans.get(idx).cloned() {
@@ -711,7 +716,7 @@ async fn fetch_manifest(
                     }
                     Err(e) => {
                         log::warn!("[video-stream] pooled attempt {} failed: {e}", attempt + 1);
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        tokio::time::sleep(MANIFEST_RETRY_BACKOFF).await;
                     }
                 }
             }
