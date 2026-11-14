@@ -161,3 +161,37 @@ pub(super) fn unescape_json_string(s: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unescapes_common_json_escapes() {
+        assert_eq!(unescape_json_string(r#"a\tb"#), "a\tb");
+        assert_eq!(unescape_json_string(r#"line1\nline2"#), "line1\nline2");
+        assert_eq!(unescape_json_string(r#"tab\there"#), "tab\there");
+        assert_eq!(unescape_json_string(r#"back\\slash"#), "back\\slash");
+        assert_eq!(unescape_json_string(r#"solidus\/"#), "solidus/");
+    }
+
+    #[test]
+    fn unescapes_a_unicode_escape() {
+        assert_eq!(unescape_json_string(r#"\u0041"#), "A");
+    }
+
+    #[test]
+    fn keeps_an_unknown_escape_literally() {
+        assert_eq!(unescape_json_string(r#"\q"#), "\\q");
+    }
+
+    #[test]
+    fn passes_plain_text_through() {
+        assert_eq!(unescape_json_string("no escapes here"), "no escapes here");
+    }
+
+    #[test]
+    fn returns_nothing_without_the_ssr_marker() {
+        assert!(parse_browse_ssr("<html><body>nothing</body></html>").is_empty());
+    }
+}

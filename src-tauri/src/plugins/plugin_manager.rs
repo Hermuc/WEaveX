@@ -259,3 +259,51 @@ fn extract_rar(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_plugin() -> PluginDef {
+        PluginDef {
+            id: "testplug",
+            name: "Test Plugin",
+            download_url: "https://example.com/x.zip",
+            binary_name: "testplug.exe",
+            is_zip: true,
+            strip_prefix: None,
+        }
+    }
+
+    #[test]
+    fn installed_is_false_when_the_dir_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_plugin_installed(dir.path(), &sample_plugin()));
+    }
+
+    #[test]
+    fn installed_is_false_when_only_the_dir_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("testplug")).unwrap();
+        assert!(!is_plugin_installed(dir.path(), &sample_plugin()));
+    }
+
+    #[test]
+    fn installed_is_true_when_the_binary_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let pdir = dir.path().join("testplug");
+        std::fs::create_dir(&pdir).unwrap();
+        std::fs::write(pdir.join("testplug.exe"), b"x").unwrap();
+        assert!(is_plugin_installed(dir.path(), &sample_plugin()));
+    }
+
+    #[test]
+    fn get_plugin_path_is_none_or_points_at_the_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(get_plugin_path(dir.path(), &sample_plugin()).is_none());
+        let pdir = dir.path().join("testplug");
+        std::fs::create_dir(&pdir).unwrap();
+        std::fs::write(pdir.join("testplug.exe"), b"x").unwrap();
+        assert!(get_plugin_path(dir.path(), &sample_plugin()).is_some());
+    }
+}

@@ -208,3 +208,30 @@ fn default_settings() -> Value {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_the_settings_prefix() {
+        assert_eq!(normalize_settings_path("settings.general"), "general");
+        assert_eq!(
+            normalize_settings_path("settings.general.appearance.theme"),
+            "general.appearance.theme"
+        );
+    }
+
+    #[test]
+    fn leaves_an_unprefixed_path_alone() {
+        assert_eq!(normalize_settings_path("general.theme"), "general.theme");
+        assert_eq!(normalize_settings_path(""), "");
+    }
+
+    #[test]
+    fn only_one_leading_prefix_is_removed() {
+        // A path that itself starts with "settings." after the first strip keeps
+        // the second occurrence.
+        assert_eq!(normalize_settings_path("settings.settings.x"), "settings.x");
+    }
+}

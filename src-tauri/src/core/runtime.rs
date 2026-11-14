@@ -241,3 +241,28 @@ async fn download_and_extract_runtime(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_dir_is_not_a_valid_portable_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_portable_runtime_valid(dir.path()));
+    }
+
+    #[test]
+    fn a_missing_dir_is_not_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_portable_runtime_valid(&dir.path().join("nope")));
+    }
+
+    #[test]
+    fn a_dir_with_the_dotnet_binary_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = if cfg!(windows) { "dotnet.exe" } else { "dotnet" };
+        std::fs::write(dir.path().join(exe), b"x").unwrap();
+        assert!(is_portable_runtime_valid(dir.path()));
+    }
+}
