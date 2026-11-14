@@ -40,7 +40,7 @@
 | 元凶 | 阻塞原因 | 修复方式 | 状态 |
 |---|---|---|---|
 | **dotnet --list-runtimes 子进程** | Windows 创建进程时会短暂阻塞**父进程的所有线程**（加载器持有进程级锁） | 不再创建子进程，改为纯文件系统探测 | ✅ 已修 |
-| **we_list_installed 扫盘时持有客户端读锁** | 扫盘数秒，全程持 RwLock 读锁；所有同步 we_* 命令跑在主线程，全部卡在该锁上 | **未完成**（见第五节） | ❌ 待修 |
+| **we_list_installed 扫盘时持有客户端读锁** | 扫盘全程持有 RwLock 读锁；所有同步 we_* 命令跑在主线程并等待该锁 | **未完成**（见第五节） | ⚠️ 待验证/待修 |
 
 ### 2.3 一个必须记住的陷阱
 
@@ -55,7 +55,7 @@ tauri::async_runtime::spawn_blocking(is_dotnet_installed).await
 1. **不创建子进程**（首选）；
 2. 把创建推迟到窗口完全稳定之后（治标，且推迟后问题会重现）。
 
----PLACEHOLDER
+---
 
 ## 三、症状 A（启动透明框）的排查过程
 
@@ -168,25 +168,58 @@ pub async fn we_list_installed(...) -> Result<Vec<InstalledWallpaper>, String> {
         if force {
             guard.invalidate_installed();   // 内部还要拿 installed_cache 的 Mutex
         }
-        guard.installed_wallpapers()        // 扫盘数秒，全程持有 client 读锁
+        guard.installed_wallpapers()        // 扫盘全程持有 client 读锁（实测本机仅 66ms）
     })
 }
 ```
 
-**问题**：扫盘期间一直持有 RwLock 的读锁。
+**问题（假设，尚未实测证实）**：扫盘期间一直持有 RwLock 的读锁。
 
-而所有同步 we_* 命令都跑在**主线程**上，且都要 state.we_client.read()：
+
+而剩下 **14 个同步 `we_*` 命令**（`we_get_directory`、`we_play`、`we_pause`、`we_stop`、
+`we_mute`、`we_unmute`、`we_next_wallpaper`、`we_previous_wallpaper`、`we_show_icons`、
+`we_hide_icons`、`we_open_playlist`、`we_open_profile`、`we_open`、`we_set_directory`）
+仍然跑在**主线程**上，且都要 `state.we_client.read()`：
+
 
 ```rust
-pub fn we_active_pubfileids(...) -> Result<Vec<String>, String> {
-    Ok(state.we_client.read().active_pubfileids())   // 等锁，主线程卡住
+pub fn we_play(state: AppStateHandle<'_>, monitor: Option<u32>) -> Result<(), String> {
+    state.we_client.read().play(monitor).map_err(map_err)   // 等锁，主线程卡住
 }
 ```
 
 **主线程卡在锁上 → 窗口无法重绘 → 透明框。**
 
-这正好解释只有第一次：第一次扫盘（数秒，持锁）→ 有框；
+**但本机实测：扫描三个目录共 35 个 project.json 只需 66 毫秒**，远不足以造成肉眼可见的卡顿。因此这个假设**不足以为解释症状 B**，必须继续寻找首次切换时真正耗时的操作。原假设保留如下，供后续排除：
+
+第一次扫盘（若持锁）→ 有框；
 之后命中 installed_cache（几乎瞬时）→ 无框。
+
+### 4.3.1 实测数据（推翻了「扫盘慢」的假设）
+
+在本机（Windows 11，NVMe）实测扫描三个目录：
+
+| 目录 | 子目录数 |
+|---|---|
+| projects/myprojects | 0 |
+| projects/defaultprojects | 0 |
+| steamapps/workshop/content/431960 | **35** |
+
+**读取全部 35 个 project.json 耗时 66 毫秒。**
+
+这个数字很重要：它说明「扫盘持锁」**不足以解释症状 B** —— 66ms 的锁占用
+不会造成肉眼可见的卡顿。所以 4.3 的假设**尚未被证实**，症状 B 的真正原因
+仍需继续排查。候选方向：
+
+1. `metadata_get_all` 的 `store.read().get_all()` —— 若 metadata.json 很大，
+   克隆整个 Value 可能比扫盘更慢；
+2. 首次切换时 React 需要挂载整棵 InstalledView 组件树（含筛选器、网格），
+   可能产生大量同步渲染工作；
+3. 预览图批量解码（35 张封面同时开始加载）。
+
+**下一步应该先测量**：在 `useWallpaperActions.refresh` 里打 `performance.now()`
+打点，分别记录 `we_list_installed` 与 `metadata_get_all` 的耗时，再决定优化谁。
+**不要在没有测量数据的情况下继续改代码。**
 
 ### 4.4 一次失败的修复尝试（**请勿重犯**）
 
@@ -229,6 +262,68 @@ client.read().store_installed(scanned.clone());              // 短暂加锁写�
 读写锁保护范围内，所以写缓存不需要 we_client 的锁。
 
 ---
+
+## 四点五、历史提交 3e1909f 揭示的第三处根因（**重要**）
+
+本仓库早先有一个提交 `3e1909f fix(installed): kill the flashing ghost, restore lost animations`，
+它的提交信息记录了这个鬼影的**两个原始成因**：
+
+> 1. `we_list_installed` walked three directories and parsed a project.json per entry on every call.
+>    The Installed view calls it on each mount, so a view switch meant a full disk scan; that stalls
+>    the UI thread long enough for the compositor to show the window's rounded, translucent frame
+>    instead of the view.
+> 2. `sync_cookies`, `is_logged_in`, `auto_login` and `prepare_login` all called `ensure_window()`,
+>    so merely *checking* the session at startup built the 1000x720 hidden Steam window. Creating it
+>    makes Windows paint the window's non-client frame for a moment, which is the same ghost on launch.
+>    Only show_login and login_fill create it now.
+
+### 4.5.1 第一条：修复仍然有效
+
+`we_list_installed` 现在确实有缓存（`installed_cache`），只在 `force` 时重扫。
+`ensure_window()` 也只在 `show_login` 与 `login_fill` 里被调用，`sync_cookies` / `is_logged_in` /
+`prepare_login` 都不再创建窗口。**这两点符合当年的修复。**
+
+### 4.5.2 第二条：**已被后续改动破坏**
+
+为了修「重启后掉登录」，后来在启动路径上加了：
+
+```
+setup() -> init_cookies() -> ensure_profile_loaded() -> create_hidden_window()
+```
+
+`ensure_profile_loaded()` 的文档注释坦白写着：
+
+> Create the hidden Steam webview first. Every cookie/session read short-circuits to
+> "logged out" when the window does not exist yet, and nothing used to create it at startup —
+> so WebView2's persisted `steamLoginSecure` was never read and the user appeared signed out
+> after every restart.
+
+**这等于把 `3e1909f` 明确修掉的「启动时创建隐藏窗口」又请了回来**，
+理由是「不创建就读不到持久化的 cookie」。
+
+所以启动时的鬼影很可能与这一条直接相关 —— 而 `dotnet_init` 的二分结论之所以成立，
+是因为两个子进程/窗口创建的卡顿叠加在一起，去掉任意一个都可能让现象低于肉眼阈值。
+
+**这是一个设计层面的冲突，没有免费的午餐**：
+
+| 选项 | 代价 |
+|---|---|
+| 启动不创建隐藏窗口 | 重启后读不到持久化 cookie → 用户看着像掉登录（除非有 OAuth session 兜底）|
+| 启动创建隐藏窗口 | 创建瞬间可能闪一下（即本 bug）|
+| 启动创建但**延迟到窗口稳定后** | 无闪，但用户可能在预热完成前就操作 → 暂时像未登录 |
+| 启动创建但**完全不显示**（`visible(false)` + 屏幕外定位）| 已尝试，见下 |
+
+当前代码在 `create_hidden_window` 里已经做了：
+
+```rust
+.visible(false)
+.decorations(false)
+.shadow(false)
+.skip_taskbar(true)
+```
+
+并且 `commands/we.rs` 的 `we_list_installed` 也改成了 `spawn_blocking`。
+但 `create_hidden_window` 由 `run_on_main_thread` 调度，**仍然发生在主线程上**。
 
 ## 五、当前代码状态（截至本文提交）
 

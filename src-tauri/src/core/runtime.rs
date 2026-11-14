@@ -6,7 +6,6 @@
 //! environment variable.
 
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -112,26 +111,49 @@ fn emit_status(app: &AppHandle, phase: DotnetPhase, message: &str, progress: Opt
     app.emit("dotnet://status", &status).ok();
 }
 
-/// Checks if .NET 8, 9, or 10 is installed by running `dotnet --list-runtimes`.
+/// Checks whether a .NET 8/9/10 runtime is available, **without spawning a
+/// child process**.
+///
+/// This used to run `dotnet --list-runtimes` via
+/// `std::process::Command::output()`. On Windows, creating a process briefly
+/// blocks *every* thread in the parent -- the loader takes a process-wide lock
+/// while it maps the new image -- and that stall lands in the window's
+/// first-paint window. That is what produced the translucent rectangle users
+/// saw at launch.
+///
+/// `spawn_blocking` does not help: the stall is in process creation itself,
+/// not in the thread that waits for it.
 fn is_dotnet_installed() -> anyhow::Result<bool> {
-    let output = Command::new("dotnet").arg("--list-runtimes").output();
+    // A runtime is usable when its `Microsoft.NETCore.App` shared framework
+    // directory holds a version folder for 8.x / 9.x / 10.x.
+    const CANDIDATE_ROOTS: [&str; 2] = [
+        r"C:\Program Files\dotnet\shared\Microsoft.NETCore.App",
+        r"C:\Program Files (x86)\dotnet\shared\Microsoft.NETCore.App",
+    ];
 
-    let Ok(output) = output else {
-        // dotnet command not found
-        return Ok(false);
-    };
-
-    if !output.status.success() {
-        return Ok(false);
+    for root in CANDIDATE_ROOTS {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(version) = name.to_str() else {
+                continue;
+            };
+            let major = version
+                .split('.')
+                .next()
+                .and_then(|m| m.parse::<u32>().ok());
+            if matches!(major, Some(8) | Some(9) | Some(10)) {
+                return Ok(true);
+            }
+        }
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Look for Microsoft.NETCore.App 8.x, 9.x, or 10.x
-    for line in stdout.lines() {
-        if line.contains("Microsoft.NETCore.App")
-            && (line.contains(" 8.") || line.contains(" 9.") || line.contains(" 10."))
-        {
+    // DOTNET_ROOT points at a custom (often portable) install.
+    if let Ok(root) = std::env::var("DOTNET_ROOT") {
+        let shared = std::path::Path::new(&root).join("shared/Microsoft.NETCore.App");
+        if shared.is_dir() {
             return Ok(true);
         }
     }
