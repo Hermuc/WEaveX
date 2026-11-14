@@ -214,19 +214,11 @@ pub async fn steam_qr_login_finalize(
     access_token: String,
     _refresh_token: String,
 ) -> Result<(), String> {
-    let parts: Vec<&str> = access_token.split('.').collect();
-    if parts.len() < 2 {
-        return Err("Invalid access token".into());
-    }
-
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    let payload = URL_SAFE_NO_PAD
-        .decode(parts[1])
-        .map_err(|e| e.to_string())?;
-    let jwt: serde_json::Value = serde_json::from_slice(&payload).map_err(|e| e.to_string())?;
-
-    let steamid = jwt["sub"].as_str().ok_or("No sub in JWT")?;
-    let steam_login_secure = format!("{}%7C%7C{}", steamid, access_token);
+    // Same JWT decoding as the OAuth path; one implementation, not two.
+    let steamid = jwt_subject(&access_token)
+        .ok_or_else(|| "Invalid access token: no SteamID claim".to_string())?;
+    let steam_login_secure =
+        crate::accounts::StoredSteamSession::steam_login_secure(&steamid, &access_token);
 
     use rand::RngExt;
     let sessionid: String = rand::rng()

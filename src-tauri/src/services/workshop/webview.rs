@@ -224,7 +224,7 @@ impl SteamWebview {
         let Some(w) = self.app.get_webview_window(LABEL) else {
             return Err("webview window not ready".into());
         };
-        let secure = format!("{steam_id}%7C%7C{access_token}");
+        let secure = crate::accounts::StoredSteamSession::steam_login_secure(steam_id, access_token);
         // A random session id is fine: Steam only uses it as a CSRF token, it
         // is not tied to the account.
         let session_id: String = {
@@ -347,7 +347,7 @@ impl SteamWebview {
     /// check) has to re-authenticate by hand, including Steam Guard. Copying the
     /// cookie DB first means the session can be restored.
     fn backup_cookie_db(&self) -> Option<std::path::PathBuf> {
-        let data_dir = dirs::data_local_dir()?.join("WEave");
+        let data_dir = crate::app_state::resolve_app_data_dir();
         let src = data_dir
             .join("SteamWebView")
             .join("EBWebView")
@@ -368,9 +368,9 @@ impl SteamWebview {
 
     /// Put the cookie database back after a destructive clear.
     pub fn restore_cookie_db(&self) -> bool {
-        let Some(data_dir) = dirs::data_local_dir().map(|d| d.join("WEave")) else {
-            return false;
-        };
+        // The resolver always yields a path, so the only failure mode left is
+        // "no backup on disk", which the check below already covers.
+        let data_dir = crate::app_state::resolve_app_data_dir();
         let backup = data_dir.join("SteamWebView.cookies.bak");
         if !backup.is_file() {
             return false;

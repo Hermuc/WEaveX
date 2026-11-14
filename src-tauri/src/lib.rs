@@ -42,13 +42,11 @@ pub fn run() {
         log::LevelFilter::Info
     };
 
-    // Try to initialize custom logger, fallback to env_logger
-    if let Some(data_dir) = dirs::data_local_dir() {
-        let log_dir = data_dir.join("WEave");
-        if logger::WEaveLogger::init(&log_dir, log_level).is_err() {
-            env_logger::try_init().ok();
-        }
-    } else {
+    // Try to initialize custom logger, fallback to env_logger.
+    // The data directory comes from the one resolver so the logs always sit
+    // next to the config, WebView2 profile and plugins.
+    let log_dir = app_state::resolve_app_data_dir();
+    if logger::WEaveLogger::init(&log_dir, log_level).is_err() {
         env_logger::try_init().ok();
     }
 

@@ -269,7 +269,11 @@ impl AppState {
 ///
 /// Uses the same identifier as the Tauri app (WEave) to keep
 /// all application data (config, cache, WebView2) in one location.
-fn resolve_app_data_dir() -> PathBuf {
+///
+/// This is the single source of truth for the location: the plugin paths and
+/// the logger both resolve it through here, so renaming the directory is a
+/// one-line change rather than five.
+pub fn resolve_app_data_dir() -> PathBuf {
     // Windows: %LOCALAPPDATA%\WEave
     // macOS:   ~/Library/Application Support/WEave
     // Linux:   $XDG_DATA_HOME/WEave or ~/.local/share/WEave

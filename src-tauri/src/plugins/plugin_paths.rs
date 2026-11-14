@@ -8,22 +8,10 @@
 
 use std::path::PathBuf;
 
-/// Resolve the shared app data directory.
-fn resolve_app_data_dir() -> PathBuf {
-    if let Some(base) = dirs::data_local_dir() {
-        return base.join("WEave");
-    }
-
-    if let Some(base) = dirs::data_dir() {
-        return base.join("WEave");
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        return home.join(".weave");
-    }
-
-    PathBuf::from("./WEave")
-}
+// The data directory is resolved in one place only; keeping a second copy here
+// meant a rename had to be applied in several files or the plugins would end up
+// looking somewhere else than the rest of the app.
+use crate::app_state::resolve_app_data_dir;
 
 /// Get the plugins directory in the shared app data directory.
 pub fn plugins_dir() -> PathBuf {

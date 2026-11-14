@@ -63,11 +63,21 @@ impl StoredSteamSession {
     /// spells it. The same value is valid on both the community and store
     /// domains, so both get a copy.
     pub fn login_cookies(&self) -> Vec<(&'static str, String)> {
-        let secure = format!("{}%7C%7C{}", self.steam_id, self.access_token);
+        let secure = Self::steam_login_secure(&self.steam_id, &self.access_token);
         vec![
             ("steamcommunity.com", secure.clone()),
             ("steampowered.com", secure),
         ]
+    }
+
+    /// The one place that spells the `steamLoginSecure` value.
+    ///
+    /// `%7C%7C` is the URL-encoded form of `||`, which is exactly what Steam's
+    /// own front end writes. Callers that only hold the two strings (the
+    /// webview's `install_session_cookies`, for instance) use this instead of
+    /// re-deriving the format, so there is a single place to get it wrong.
+    pub fn steam_login_secure(steam_id: &str, access_token: &str) -> String {
+        format!("{steam_id}%7C%7C{access_token}")
     }
 }
 

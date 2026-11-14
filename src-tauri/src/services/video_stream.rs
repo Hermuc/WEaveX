@@ -520,7 +520,7 @@ pub fn forget_session() {
 /// persisted and reused across restarts. The manifest id is part of the key, so
 /// a re-uploaded wallpaper (new manifest) misses the cache and re-resolves.
 fn layout_cache_path() -> Option<std::path::PathBuf> {
-    let base = dirs::data_local_dir()?.join("WEave");
+    let base = crate::app_state::resolve_app_data_dir();
     std::fs::create_dir_all(&base).ok()?;
     Some(base.join("video_layouts.json"))
 }
@@ -648,7 +648,7 @@ pub async fn login(username: &str, password: &str) -> anyhow::Result<SteamClient
 }
 
 fn token_cache_path(username: &str) -> Option<std::path::PathBuf> {
-    let base = dirs::data_local_dir()?.join("WEave");
+    let base = crate::app_state::resolve_app_data_dir();
     std::fs::create_dir_all(&base).ok()?;
     let safe: String = username
         .chars()
