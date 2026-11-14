@@ -152,10 +152,10 @@ impl WorkshopClient {
             client,
             cookie_jar,
             page_cache: Arc::new(Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(20).unwrap(),
+                std::num::NonZeroUsize::new(20).expect("cache size > 0"),
             ))),
             item_cache: Arc::new(Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(600).unwrap(),
+                std::num::NonZeroUsize::new(600).expect("cache ttl seconds > 0"),
             ))),
         }
     }

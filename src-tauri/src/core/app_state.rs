@@ -133,7 +133,7 @@ impl AppState {
             // whole startup sync died silently and the app behaved as if the
             // session had never been restored.
             std::thread::sleep(EVENT_LOOP_SETTLE);
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().expect("build tokio runtime");
             rt.block_on(async move {
                 // Create the hidden Steam webview first. Every cookie/session
                 // read short-circuits to "logged out" when the window does
@@ -207,7 +207,7 @@ impl AppState {
         let dotnet_root = self.dotnet_root.clone();
         let app_data_dir = self.app_data_dir.clone();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().expect("build tokio runtime");
             rt.block_on(async move {
                 match crate::runtime::ensure_dotnet_runtime(&app, &app_data_dir).await {
                     Ok(path) => {
@@ -232,7 +232,7 @@ impl AppState {
         let app = self.app_handle.clone();
         let plugins_dir = self.app_data_dir.join("plugins");
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().expect("build tokio runtime");
             rt.block_on(async move {
                 match plugin_manager::ensure_plugins(&app, &plugins_dir).await {
                     Ok(()) => {
