@@ -51,6 +51,33 @@ pub struct SteamWebview {
     community_attempted: std::sync::atomic::AtomicBool,
 }
 
+/// Write the session cookies for a window, on both Steam domains.
+///
+/// Shared by the QR and saved-session paths so the HttpOnly / secure /
+/// same-site flags cannot drift between them: a mismatch here silently drops
+/// the whole login with no error from Steam.
+pub fn install_cookies_for_window(
+    w: &tauri::WebviewWindow,
+    secure: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    for domain in ["steamcommunity.com", "steampowered.com"] {
+        for (name, value) in [
+            ("steamLoginSecure", secure),
+            ("sessionid", session_id),
+        ] {
+            let cookie = tauri::webview::Cookie::build((name, value))
+                .domain(domain)
+                .path("/")
+                .secure(true)
+                .http_only(true)
+                .build();
+            w.set_cookie(cookie).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 impl SteamWebview {
     pub fn new(app: AppHandle, data_dir: PathBuf, jar: Arc<Jar>) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
@@ -210,6 +237,7 @@ impl SteamWebview {
         false
     }
 
+
     /// Install a saved Steam session into the webview's cookie store.
     ///
     /// This is the payoff of persisting `{steamid, access_token}`:
@@ -240,20 +268,7 @@ impl SteamWebview {
                 .collect::<String>()
                 .to_lowercase()
         };
-        for domain in ["steamcommunity.com", "steampowered.com"] {
-            for (name, value) in [
-                ("steamLoginSecure", secure.as_str()),
-                ("sessionid", session_id.as_str()),
-            ] {
-                let cookie = tauri::webview::Cookie::build((name, value))
-                    .domain(domain)
-                    .path("/")
-                    .secure(true)
-                    .http_only(true)
-                    .build();
-                w.set_cookie(cookie).map_err(|e| e.to_string())?;
-            }
-        }
+        install_cookies_for_window(&w, &secure, &session_id)?;
         log::info!("[steam-webview] installed saved session cookies");
         Ok(())
     }

@@ -247,20 +247,11 @@ pub async fn steam_qr_login_finalize(
     //
     // Both domains matter: the community site serves the pages we scrape, while
     // the store domain is what the login flow itself uses.
-    for domain in ["steamcommunity.com", "steampowered.com"] {
-        for (name, value) in [
-            ("steamLoginSecure", steam_login_secure.as_str()),
-            ("sessionid", sessionid.as_str()),
-        ] {
-            let cookie = tauri::webview::Cookie::build((name, value))
-                .domain(domain)
-                .path("/")
-                .secure(true)
-                .http_only(true)
-                .build();
-            w.set_cookie(cookie).map_err(|e| e.to_string())?;
-        }
-    }
+    crate::workshop::webview::install_cookies_for_window(
+        &w,
+        &steam_login_secure,
+        &sessionid,
+    )?;
 
     w.eval("window.location.href = 'https://steamcommunity.com/'")
         .map_err(|e| e.to_string())?;
