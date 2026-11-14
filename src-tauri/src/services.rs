@@ -4,6 +4,7 @@ pub mod extract;
 pub mod fs_util;
 pub mod i18n;
 pub mod metadata;
+pub mod process_reader;
 pub mod qr;
 pub mod steam_auth;
 pub mod translator;

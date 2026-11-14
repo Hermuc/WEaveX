@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use tauri::{command, AppHandle, Emitter};
-use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -141,104 +140,26 @@ pub async fn accounts_verify_custom(
     // Merge stdout and stderr into a single channel, same pattern as download/mod.rs
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
 
-    if let Some(mut out) = stdout {
+    if let Some(out) = stdout {
         let tx = tx.clone();
-        tokio::spawn(async move {
-            let mut buf = [0u8; 1024];
-            let mut current_line = String::new();
-            while let Ok(n) = out.read(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                let chunk = String::from_utf8_lossy(&buf[..n]);
-                for c in chunk.chars() {
-                    if c == '\n' {
-                        let line = std::mem::take(&mut current_line);
-                        let trimmed = line.trim_end_matches('\r');
-                        if !trimmed.is_empty() {
-                            let _ = tx.send(trimmed.to_string()).await;
-                        }
-                    } else {
-                        current_line.push(c);
-                        // These prompts are printed with Console.Write (NO trailing
-                        // newline) and then block on input, so we must detect them
-                        // mid-line. We deliberately do NOT flush on a bare
-                        // "STEAM GUARD!" prefix: the email AND authenticator code
-                        // prompts also start with "STEAM GUARD! ...", and flushing on
-                        // the prefix alone made them get sent as a standalone
-                        // "STEAM GUARD!" line that the classifier then mistook for a
-                        // mobile-app confirmation. We wait until a disambiguating
-                        // keyword (a code-entry phrase or a SPECIFIC confirm phrase) is
-                        // present so the full prompt reaches the classifier intact.
-                        let lower = current_line.to_lowercase();
-                        let is_code_prompt = (lower.contains("enter") && lower.contains("code"))
-                            || lower.contains("auth code")
-                            || lower.contains("authentication code")
-                            || lower.contains("code sent to")
-                            || lower.contains("two-factor")
-                            || lower.contains("two factor")
-                            || lower.contains("2 factor")
-                            || lower.contains("authenticator app");
-                        let is_confirm_prompt = lower.contains("confirm your sign in")
-                            || lower.contains("confirm the sign in")
-                            || lower.contains("use the steam mobile app")
-                            || lower.contains("mobile app to confirm")
-                            || lower.contains("waiting for confirmation")
-                            || lower.contains("waiting for steam guard");
-                        // Catch-all for an email / authenticator code prompt that
-                        // is printed with Console.Write and then BLOCKS on
-                        // Console.ReadLine(). Such prompts never produce a newline,
-                        // and the exact wording varies between DepotDownloader
-                        // builds, so the keyword lists above can miss them - in
-                        // which case the line stays stuck in `current_line` until
-                        // the process is killed (the user pressed Cancel), which is
-                        // exactly the "modal only appears after Cancel" bug.
-                        //
-                        // A prompt that is waiting for typed input ends with a
-                        // colon (e.g. "STEAM GUARD! ... code ...:"). When we see a
-                        // Steam Guard / 2FA line whose last non-space character is
-                        // a ':' we flush it immediately so the classifier can open
-                        // the 2FA modal without waiting for the (never-coming)
-                        // newline. Device confirmations don't block on input and
-                        // are newline-terminated, so they are unaffected.
-                        let trimmed = lower.trim_end();
-                        let is_blocking_input_prompt = trimmed.ends_with(':')
-                            && (lower.contains("steam guard")
-                                || lower.contains("code")
-                                || lower.contains("2fa")
-                                || lower.contains("two-factor")
-                                || lower.contains("two factor"));
-                        if is_code_prompt || is_confirm_prompt || is_blocking_input_prompt {
-                            let line = std::mem::take(&mut current_line);
-                            let _ = tx.send(line).await;
-                        }
-                    }
-                }
-            }
-            if !current_line.is_empty() {
-                let _ = tx.send(current_line).await;
-            }
-        });
+        tokio::spawn(crate::services::process_reader::spawn_line_reader(
+            out,
+            tx,
+            "",
+            is_blocking_steam_guard_prompt,
+        ));
     }
 
-    if let Some(mut err) = stderr {
+    if let Some(err) = stderr {
         let tx = tx.clone();
-        tokio::spawn(async move {
-            use tokio::io::AsyncBufReadExt;
-            let mut reader = tokio::io::BufReader::new(&mut err);
-            let mut line = String::new();
-            while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 {
-                    break;
-                }
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    let _ = tx.send(trimmed).await;
-                }
-                line.clear();
-            }
-        });
+        tokio::spawn(crate::services::process_reader::spawn_line_reader(
+            err,
+            tx,
+            "",
+            |_: &str| false,
+        ));
     }
+
     drop(tx); // drop the original sender so rx closes when both tasks finish
 
     // Process merged lines
@@ -367,6 +288,44 @@ pub async fn accounts_verify_custom(
     }
 
     Ok(())
+}
+
+
+/// Whether the accumulated partial line is a Steam Guard prompt that is
+/// blocking on console input.
+///
+/// DepotDownloader prints these with `Console.Write` (no trailing newline) and
+/// then blocks on `Console.ReadLine()`. On a redirected pipe the .NET runtime
+/// does not flush such a partial line, so we must detect it mid-line and flush
+/// it ourselves or the prompt never reaches the classifier.
+///
+/// This is the union of the three rules the inline reader used to apply:
+/// a code-entry prompt, a mobile-confirm prompt, and any Steam Guard line that
+/// ends with a colon (which is what a blocking `Console.ReadLine()` prompt
+/// looks like).
+fn is_blocking_steam_guard_prompt(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    let is_code_prompt = (lower.contains("enter") && lower.contains("code"))
+        || lower.contains("auth code")
+        || lower.contains("authentication code")
+        || lower.contains("code sent to")
+        || lower.contains("two-factor")
+        || lower.contains("two factor")
+        || lower.contains("2 factor")
+        || lower.contains("authenticator app");
+    let is_confirm_prompt = lower.contains("confirm your sign in")
+        || lower.contains("confirm the sign in")
+        || lower.contains("use the steam mobile app")
+        || lower.contains("mobile app to confirm")
+        || lower.contains("waiting for confirmation")
+        || lower.contains("waiting for steam guard");
+    let is_blocking_input_prompt = lower.trim_end().ends_with(':')
+        && (lower.contains("steam guard")
+            || lower.contains("code")
+            || lower.contains("2fa")
+            || lower.contains("two-factor")
+            || lower.contains("two factor"));
+    is_code_prompt || is_confirm_prompt || is_blocking_input_prompt
 }
 
 #[command]

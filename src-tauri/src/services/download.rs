@@ -12,11 +12,25 @@ use parking_lot::Mutex;
 use regex::Regex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::services::fs_util::{dir_has_files, dir_has_project};
+
+
+/// Whether an accumulated partial stdout line is a Steam Guard prompt that is
+/// blocking on console input.
+///
+/// DepotDownloader prints these with `Console.Write` (no trailing newline) and
+/// then blocks; the .NET runtime does not flush such a partial line to a
+/// redirected pipe, so it is detected mid-line here. This preserves the two
+/// rules the inline reader used: a code prompt (contains both "enter" and
+/// "code", or the email/authenticator phrasings) and a mobile-confirm prompt.
+fn is_steam_guard_prompt(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    (lower.contains("enter") && lower.contains("code"))
+        || lower.contains("auth code sent to your email")
+}
 
 static PROGRESS_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(\d{1,3}(?:[.,]\d+)?)\s*%").expect("progress regex"));
@@ -198,54 +212,27 @@ impl DownloadManager {
 
                 let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
 
-                if let Some(mut out) = stdout {
+                if let Some(out) = stdout {
                     let tx = tx.clone();
-                    tokio::spawn(async move {
-                        use tokio::io::AsyncReadExt;
-                        let mut buf = [0u8; 1024];
-                        let mut current_line = String::new();
-                        while let Ok(n) = out.read(&mut buf).await {
-                            if n == 0 {
-                                break;
-                            }
-                            let chunk = String::from_utf8_lossy(&buf[..n]);
-                            for c in chunk.chars() {
-                                if c == '\n' {
-                                    let line = std::mem::take(&mut current_line);
-                                    let trimmed = line.trim_end_matches('\r');
-                                    if !trimmed.is_empty() {
-                                        let _ = tx.send(format!("OUT:{}", trimmed)).await;
-                                    }
-                                } else {
-                                    current_line.push(c);
-                                    let lower = current_line.to_lowercase();
-                                    if lower.contains("enter your 2-factor auth code")
-                                        || lower.contains("auth code sent to your email")
-                                    {
-                                        let line = std::mem::take(&mut current_line);
-                                        let _ = tx.send(format!("OUT:{}", line)).await;
-                                    }
-                                }
-                            }
-                        }
-                        if !current_line.is_empty() {
-                            let _ = tx.send(format!("OUT:{}", current_line)).await;
-                        }
-                    });
+                    tokio::spawn(crate::services::process_reader::spawn_line_reader(
+                        out,
+                        tx,
+                        "OUT:",
+                        is_steam_guard_prompt,
+                    ));
                 }
 
                 if let Some(err) = stderr {
                     let tx = tx.clone();
-                    tokio::spawn(async move {
-                        let mut reader = BufReader::new(err).lines();
-                        while let Ok(Some(line)) = reader.next_line().await {
-                            if !line.trim().is_empty() {
-                                let _ = tx.send(format!("ERR:{}", line)).await;
-                            }
-                        }
-                    });
+                    tokio::spawn(crate::services::process_reader::spawn_line_reader(
+                        err,
+                        tx,
+                        "ERR:",
+                        |_: &str| false,
+                    ));
                 }
-                drop(tx);
+
+                                drop(tx);
 
                 let mut stderr_tail: Vec<String> = Vec::new();
                 let mut connection_failed = false;
