@@ -228,13 +228,7 @@ impl SteamWebview {
             return self.is_logged_in_inner();
         }
         // Freshly created: give WebView2 up to ~6s (40 * 150ms) to rehydrate.
-        for _ in 0..40 {
-            if self.is_logged_in_inner() {
-                return true;
-            }
-            sleep(Duration::from_millis(150)).await;
-        }
-        false
+        self.wait_for_login(true, 40, 150).await
     }
 
 
@@ -453,12 +447,9 @@ impl SteamWebview {
         // absent (but the page still held a Family View / parser state) the loop
         // would exit on the first tick before the wipe had any effect.
         sleep(Duration::from_millis(1500)).await;
-        for _ in 0..12 {
-            if !self.is_logged_in_inner() {
-                log::info!("[steam-webview] logout confirmed");
-                return Ok(());
-            }
-            sleep(Duration::from_millis(400)).await;
+        if self.wait_for_login(false, 12, 400).await {
+            log::info!("[steam-webview] logout confirmed");
+            return Ok(());
         }
         log::warn!("[steam-webview] logout could not clear steamLoginSecure");
         Err("Could not sign out of the current Steam session. Close WEaveR, delete the SteamWebView folder under %LOCALAPPDATA%\\WEave, then reopen and try again."
@@ -535,26 +526,31 @@ impl SteamWebview {
     /// returned `false` even though a valid session was persisted on disk by
     /// WebView2 — which is why the status flipped to "Signed in" only after
     /// the user pressed "Open Parser" and incidentally created the window.
+    /// Poll `is_logged_in_inner` until it matches `want` or the budget runs out.
+    ///
+    /// Three near-identical loops used to live in `ensure_profile_loaded`,
+    /// `logout_locked` and `is_logged_in`; they differed only in tick count,
+    /// interval and the expected polarity. Everything else — the check, the
+    /// sleep, the early return — was the same, so it lives here.
+    async fn wait_for_login(&self, want: bool, ticks: u32, interval_ms: u64) -> bool {
+        for _ in 0..ticks {
+            if self.is_logged_in_inner() == want {
+                return true;
+            }
+            sleep(Duration::from_millis(interval_ms)).await;
+        }
+        false
+    }
+
+    /// Whether the webview currently holds a valid `steamLoginSecure` cookie.
     pub async fn is_logged_in(&self) -> bool {
         let _g = self.lock.lock().await;
         // Never create the window to answer this question.
         if !self.window_exists() {
             return false;
         }
-        // The window exists (checked above), so nothing was created on this call.
-        let created = false;
-        // When we just created the window, WebView2 needs a brief moment to
-        // restore the persisted cookie jar from disk before they're readable.
-        // Poll a few times so a freshly-created window doesn't report a stale
-        // "logged out" before the session cookie has been rehydrated.
-        if created {
-            for _ in 0..20 {
-                if self.is_logged_in_inner() {
-                    return true;
-                }
-                sleep(Duration::from_millis(150)).await;
-            }
-        }
+        // The window already exists (checked above), so the cookie jar is
+        // hydrated and the answer is immediate.
         self.is_logged_in_inner()
     }
 
