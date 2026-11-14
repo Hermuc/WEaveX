@@ -12,17 +12,15 @@ import Pagination from "@/components/workshop/Pagination";
 import { SkeletonCard } from "@/components/common/Skeleton";
 import CollectionInfoDialog from "@/components/dialogs/CollectionInfoDialog";
 import { useFiltersStore } from "@/stores/filters";
-import { useRefreshStore } from "@/stores/refresh";
 import { useAppStore } from "@/stores/app";
 import { useNavStore } from "@/stores/nav";
 import { pushToast } from "@/stores/toasts";
-import { useSteamSessionStore } from "@/stores/steam-session";
 import { usePaginationContext } from "@/hooks/usePaginationContext";
+import { useWorkshopPage } from "@/hooks/useWorkshopPage";
 import { describeDownloadError } from "@/lib/errors";
 import { useWatchWhileDownloading } from "@/hooks/useWatchWhileDownloading";
-import { inTauri, tryInvoke, tryInvokeOk, tryInvokeAction } from "@/lib/tauri";
-import type { WorkshopFilters } from "@/stores/filters";
-import { CollectionContents, WorkshopItem, WorkshopPage } from "@/types/workshop";
+import { inTauri, tryInvoke, tryInvokeAction } from "@/lib/tauri";
+import { CollectionContents, WorkshopItem } from "@/types/workshop";
 
 export default function CollectionsView() {
   const { t } = useTranslation();
@@ -34,9 +32,6 @@ export default function CollectionsView() {
   const accountIndex = useAppStore((s) => s.accountIndex);
   const sub = useNavStore((s) => s.sub);
   const navBack = useNavStore((s) => s.back);
-  const steamPhase = useSteamSessionStore((s) => s.phase);
-  const [page, setPageData] = useState<WorkshopPage | null>(null);
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<WorkshopItem | null>(null);
   const [prevSub, setPrevSub] = useState(sub);
   const [requestedCollectionId, setRequestedCollectionId] = useState<string | null>(
@@ -75,10 +70,6 @@ export default function CollectionsView() {
     }
   }, [requestedCollectionId, currentPage, filters.page, setPage]);
 
-  const filtersKey = useMemo(
-    () => JSON.stringify({ f: filters, c: requestedCollectionId }),
-    [filters, requestedCollectionId],
-  );
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -106,12 +97,6 @@ export default function CollectionsView() {
     }
   }, [requestedCollectionId, sub]);
 
-  const refreshCounter = useRefreshStore((s) => s.counter);
-  const cacheRef = useRef<Map<string, WorkshopPage>>(new Map());
-
-  useEffect(() => {
-    cacheRef.current.clear();
-  }, [refreshCounter]);
 
   useEffect(() => {
     // Reset scroll to top when page changes
@@ -120,74 +105,13 @@ export default function CollectionsView() {
     }
   }, [filters.page]);
 
-  useEffect(() => {
-    if (requestedCollectionId) return;
-    let active = true;
-    const t = setTimeout(() => {
-      if (inTauri && (steamPhase === "idle" || steamPhase === "logging-in")) {
-        setLoading(true);
-        return;
-      }
-
-      const cached = cacheRef.current.get(filtersKey);
-      if (cached) {
-        setPageData(cached);
-        setLoading(false);
-      } else {
-        setLoading(true);
-      }
-
-      void (async () => {
-        if (!inTauri) {
-          setPageData(makeMockPage(filters.page));
-          setLoading(false);
-          return;
-        }
-        if (refreshCounter > 0) {
-          await tryInvokeOk("workshop_refresh_cache");
-        }
-        let result = cached;
-        if (!result) {
-          result =
-            (await tryInvoke<WorkshopPage>("workshop_browse_collections", {
-              filters,
-            })) ?? undefined;
-          if (result) cacheRef.current.set(filtersKey, result);
-        }
-        if (!active) return;
-        setPageData(result ?? null);
-        setLoading(false);
-
-        if (result && result.total_pages > filters.page) {
-          const preloadOn = await tryInvoke<boolean>(
-            "config_get",
-            { path: "settings.general.behavior.preload_next_page" },
-            true,
-          );
-          if (preloadOn === false) return;
-          const nextFilters: WorkshopFilters = {
-            ...filters,
-            page: filters.page + 1,
-          };
-          const nextKey = JSON.stringify({
-            f: nextFilters,
-            c: requestedCollectionId,
-          });
-          if (!cacheRef.current.has(nextKey)) {
-            void tryInvoke<WorkshopPage>("workshop_browse_collections", {
-              filters: nextFilters,
-            }).then((next) => {
-              if (next) cacheRef.current.set(nextKey, next);
-            });
-          }
-        }
-      })();
-    }, 0);
-    return () => {
-      active = false;
-      clearTimeout(t);
-    };
-  }, [filtersKey, filters, requestedCollectionId, refreshCounter, steamPhase]);
+  const { page, loading } = useWorkshopPage({
+    cmd: "workshop_browse_collections",
+    filters,
+    enabled: !requestedCollectionId,
+    cacheScope: requestedCollectionId,
+    mockKind: "collection",
+  });
 
   const items = page?.items ?? [];
   const total = page?.total_items ?? 0;
@@ -375,30 +299,6 @@ export default function CollectionsView() {
       />
     </div>
   );
-}
-
-function makeMockPage(page: number): WorkshopPage {
-  const items: WorkshopItem[] = Array.from({ length: 30 }, (_, i) => ({
-    pubfileid: `${500000 + (page - 1) * 30 + i}`,
-    title: `Mock Collection #${(page - 1) * 30 + i + 1}`,
-    preview_url: "",
-    author: "Author",
-    author_url: "",
-    description: "",
-    file_size: "",
-    posted_date: "",
-    updated_date: "",
-    tags: [],
-    rating_star_file: "",
-    num_ratings: "",
-    is_collection: true,
-  }));
-  return {
-    items,
-    total_items: 120,
-    total_pages: 5,
-    current_page: page,
-  };
 }
 
 // ─── Inline virtual grid for opened collection ────────────────────────────────
