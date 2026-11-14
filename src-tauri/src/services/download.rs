@@ -177,8 +177,7 @@ impl DownloadManager {
 
                 #[cfg(windows)]
                 {
-                    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    cmd.creation_flags(crate::core::platform::CREATE_NO_WINDOW);
                 }
 
                 let mut child = match cmd.spawn() {

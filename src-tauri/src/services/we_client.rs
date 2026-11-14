@@ -695,11 +695,9 @@ fn walk_size_bounded(path: &Path, total: &mut u64, depth: usize, max_depth: usiz
         }
     }
 }
-#[cfg(windows)]
 fn spawn_detached(mut cmd: Command) -> anyhow::Result<()> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(CREATE_NO_WINDOW).spawn()?;
+    crate::core::platform::hide_console_window(&mut cmd);
+    cmd.spawn()?;
     Ok(())
 }
 

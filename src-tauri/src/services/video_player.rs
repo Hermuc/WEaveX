@@ -112,12 +112,7 @@ pub fn launch(player: &Player, url: &str) -> std::io::Result<()> {
         }
     }
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    crate::core::platform::hide_console_window(&mut cmd);
 
     cmd.spawn().map(|_| ())
 }
