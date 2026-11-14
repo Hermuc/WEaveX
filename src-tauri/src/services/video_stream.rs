@@ -13,6 +13,13 @@
 //! Normal (whole-wallpaper) downloads still use DepotDownloaderMod; this module
 //! exists only for the "watch while downloading" path.
 
+mod auth;
+mod layout_cache;
+
+pub use auth::{forget_session, login, shared_login};
+pub use layout_cache::has_cached_layout;
+use layout_cache::{cached_layout, store_layout};
+
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -20,8 +27,6 @@ use steamroom::client::{LoggedIn, SteamClient};
 use steamroom::depot::manifest::{DepotManifest, ManifestFile};
 use steamroom::depot::{AppId, CellId, ChunkId, DepotId, DepotKey, ManifestId};
 use steamroom::generated;
-use steamroom_client::login::CredentialsLoginFlow;
-use steamroom_client::login::LoginBuilder;
 
 /// Wallpaper Engine's Steam app id.
 pub const WE_APP_ID: u32 = 431960;
@@ -468,216 +473,6 @@ fn decompress_manifest(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     } else {
         Ok(data.to_vec())
     }
-}
-
-/// Cached login so repeated clicks do not each pay a full CM handshake.
-///
-/// A `SteamClient` is cheap to reuse but expensive to create (connect, encrypt,
-/// logon). The streaming UI can be clicked several times in a row, and each
-/// miss used to cost 10-40s. The cached client is validated lazily: if a call
-/// on it fails the caller falls back to a fresh login.
-static SESSION: std::sync::Mutex<Option<CachedSession>> = std::sync::Mutex::new(None);
-
-struct CachedSession {
-    username: String,
-    client: SteamClient<LoggedIn>,
-}
-
-/// Get a logged-in client, reusing the cached one when the account matches.
-pub async fn shared_login(
-    username: &str,
-    password: &str,
-) -> anyhow::Result<std::sync::Arc<SteamClient<LoggedIn>>> {
-    // Reuse only for the same account; a different account must re-auth.
-    {
-        let guard = SESSION.lock().unwrap();
-        if let Some(s) = guard.as_ref() {
-            if s.username == username {
-                return Ok(std::sync::Arc::new(s.client.clone()));
-            }
-        }
-    }
-    let client = login(username, password).await?;
-    {
-        let mut guard = SESSION.lock().unwrap();
-        *guard = Some(CachedSession {
-            username: username.to_string(),
-            client: client.clone(),
-        });
-    }
-    Ok(std::sync::Arc::new(client))
-}
-
-/// Drop the cached session (call when the account changes or a call fails).
-pub fn forget_session() {
-    *SESSION.lock().unwrap() = None;
-}
-
-/// On-disk cache of resolved video layouts.
-///
-/// Resolving an item needs a manifest download, which on this network can take
-/// minutes. The layout is immutable for a given (depot, manifest) pair, so it is
-/// persisted and reused across restarts. The manifest id is part of the key, so
-/// a re-uploaded wallpaper (new manifest) misses the cache and re-resolves.
-fn layout_cache_path() -> Option<std::path::PathBuf> {
-    let base = crate::app_state::resolve_app_data_dir();
-    std::fs::create_dir_all(&base).ok()?;
-    Some(base.join("video_layouts.json"))
-}
-
-fn load_layouts() -> Vec<(u64, std::time::Instant, VideoStreamInfo)> {
-    let Some(p) = layout_cache_path() else {
-        return Vec::new();
-    };
-    let Ok(raw) = std::fs::read_to_string(&p) else {
-        return Vec::new();
-    };
-    // Stored as a plain array of VideoStreamInfo; the TTL clock restarts on load
-    // which is acceptable because entries are also validated by manifest id.
-    let Ok(list) = serde_json::from_str::<Vec<VideoStreamInfo>>(&raw) else {
-        return Vec::new();
-    };
-    list.into_iter()
-        .map(|info| (info.item_id, std::time::Instant::now(), info))
-        .collect()
-}
-
-fn persist_layouts(entries: &[(u64, std::time::Instant, VideoStreamInfo)]) {
-    let Some(p) = layout_cache_path() else { return };
-    let list: Vec<&VideoStreamInfo> = entries.iter().map(|(_, _, i)| i).collect();
-    if let Ok(json) = serde_json::to_string(&list) {
-        let _ = std::fs::write(p, json);
-    }
-}
-
-/// Cached manifest resolution per workshop item.
-///
-/// Resolving an item costs a manifest download (seconds) plus depot-key and
-/// token round-trips. Users commonly reopen the same wallpaper, so the layout is
-/// memoised. It is invalidated by TTL rather than by item id alone: workshop
-/// items can be re-uploaded, and a stale layout would serve wrong bytes.
-static LAYOUTS: std::sync::Mutex<Vec<(u64, std::time::Instant, VideoStreamInfo)>> =
-    std::sync::Mutex::new(Vec::new());
-
-const LAYOUT_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-
-fn cached_layout(item_id: u64) -> Option<VideoStreamInfo> {
-    let mut guard = LAYOUTS.lock().unwrap();
-    if guard.is_empty() {
-        *guard = load_layouts();
-    }
-    guard
-        .iter()
-        .find(|(id, at, _)| *id == item_id && at.elapsed() < LAYOUT_TTL)
-        .map(|(_, _, info)| info.clone())
-}
-
-/// True when this item's layout is already known, so the caller can skip the
-/// expensive manifest round-trip and go straight to serving bytes.
-pub fn has_cached_layout(item_id: u64) -> bool {
-    cached_layout(item_id).is_some()
-}
-
-fn store_layout(item_id: u64, info: &VideoStreamInfo) {
-    let mut guard = LAYOUTS.lock().unwrap();
-    guard.retain(|(id, at, _)| *id != item_id && at.elapsed() < LAYOUT_TTL);
-    guard.push((item_id, std::time::Instant::now(), info.clone()));
-    persist_layouts(&guard);
-}
-
-/// Establish a logged-in Steam session for the streaming pipeline.
-///
-/// Tried in order, most convenient first:
-///   1. Local Steam client token (DPAPI) — no password, no Steam Guard.
-///   2. A refresh token WEave cached from an earlier sign-in.
-///   3. Username + password — only for accounts without Steam Guard.
-pub async fn login(username: &str, password: &str) -> anyhow::Result<SteamClient<LoggedIn>> {
-    if let Some(tok) = steamroom_client::steam_creds::extract_token(username) {
-        match LoginBuilder::new()
-            .device_name("WEaveR")
-            .with_refresh_token(&tok.account_name, &tok.refresh_token)
-            .login()
-            .await
-        {
-            Ok(client) => {
-                log::info!("[video-stream] logged in via local Steam token");
-                return Ok(client);
-            }
-            Err(e) => log::warn!("[video-stream] local Steam token failed: {e}"),
-        }
-    }
-    if let Some(tok) = load_cached_token(username) {
-        match LoginBuilder::new()
-            .device_name("WEaveR")
-            .with_refresh_token(username, &tok)
-            .login()
-            .await
-        {
-            Ok(client) => {
-                log::info!("[video-stream] logged in via cached refresh token");
-                return Ok(client);
-            }
-            Err(e) => log::warn!("[video-stream] cached refresh token failed: {e}"),
-        }
-    }
-    let flow = LoginBuilder::new()
-        .device_name("WEaveR")
-        .with_credentials(username, password)
-        .begin()
-        .await
-        .map_err(|e| anyhow::anyhow!("steam login: {e}"))?;
-    match flow {
-        CredentialsLoginFlow::Approved(a) => {
-            let tokens = a.tokens();
-            if let Some(rt) = tokens.refresh_token.clone().into() {
-                let _ = save_cached_token(username, &rt);
-            }
-            a.finish()
-                .await
-                .map_err(|e| anyhow::anyhow!("steam logon: {e}"))
-        }
-        CredentialsLoginFlow::NeedsGuardCode(_) | CredentialsLoginFlow::NeedsMobileConfirm(_) => {
-            Err(anyhow::anyhow!(
-                "STEAM_GUARD_REQUIRED: sign in to the Steam desktop app so a reusable token exists"
-            ))
-        }
-        _ => Err(anyhow::anyhow!(
-            "steam login: unsupported confirmation flow"
-        )),
-    }
-}
-
-fn token_cache_path(username: &str) -> Option<std::path::PathBuf> {
-    let base = crate::app_state::resolve_app_data_dir();
-    std::fs::create_dir_all(&base).ok()?;
-    let safe: String = username
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    Some(base.join(format!("steam_token_{safe}.txt")))
-}
-
-fn load_cached_token(username: &str) -> Option<String> {
-    let p = token_cache_path(username)?;
-    let t = std::fs::read_to_string(p).ok()?.trim().to_string();
-    if t.is_empty() {
-        None
-    } else {
-        Some(t)
-    }
-}
-
-fn save_cached_token(username: &str, token: &str) -> std::io::Result<()> {
-    if let Some(p) = token_cache_path(username) {
-        std::fs::write(p, token)?;
-    }
-    Ok(())
 }
 
 /// Fetch CDN auth tokens for every advertised host, in parallel.
