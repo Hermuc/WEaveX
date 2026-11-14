@@ -119,23 +119,20 @@ pub fn parse_collection_contents(html: &str, collection_id: &str) -> CollectionC
         let right = text(*r);
         let lr = right.to_lowercase();
         let ll = left.to_lowercase();
-        if lr.contains("unique") || lr.contains("уникальн") {
+        if lr.contains("unique") {
             info.insert("unique_visitors".into(), Value::String(left));
-        } else if (lr.contains("всего") && lr.contains("избранн"))
-            || (lr.contains("total") && lr.contains("favorit"))
-        {
+        } else if lr.contains("total") && lr.contains("favorit") {
             info.insert("total_favorited".into(), Value::String(left));
-        } else if lr.contains("избранн") || lr.contains("favorit") {
+        } else if lr.contains("favorit") {
             info.insert("favorited".into(), Value::String(left));
-        } else if lr.contains("подписч") || lr.contains("subscriber") {
+        } else if lr.contains("subscriber") {
             info.insert("subscribers".into(), Value::String(left));
-        } else if ll.contains("добавлен")
-            || ll.contains("posted")
+        } else if ll.contains("posted")
             || ll.contains("added")
             || ll.contains("created")
         {
             info.insert("posted_date".into(), Value::String(right));
-        } else if ll.contains("изменён") || ll.contains("updated") || ll.contains("changed")
+        } else if ll.contains("updated") || ll.contains("changed")
         {
             info.insert("updated_date".into(), Value::String(right));
         }

@@ -28,8 +28,8 @@ describe("normalizeLanguage", () => {
   it("returns null for unsupported or empty input", () => {
     expect(normalizeLanguage("de-DE")).toBeNull();
     expect(normalizeLanguage("fr")).toBeNull();
-    // Russian used to ship; it was dropped, so it must now be rejected.
-    expect(normalizeLanguage("ru")).toBeNull();
+    // An unsupported locale must be rejected.
+    expect(normalizeLanguage("ja")).toBeNull();
     expect(normalizeLanguage("")).toBeNull();
     expect(normalizeLanguage(null)).toBeNull();
     expect(normalizeLanguage(undefined)).toBeNull();

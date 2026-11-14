@@ -2,7 +2,7 @@ import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES } from "./languages";
 import type { SupportedLanguage } from "./languages";
 
 /**
- * Map an arbitrary BCP-47-ish tag (e.g. "zh-CN", "en_US", "ru") to one of the
+ * Map an arbitrary BCP-47-ish tag (e.g. "zh-CN", "en_US", "ja") to one of the
  * supported language codes, or null when nothing matches.
  *
  * Matching rules, applied in order:

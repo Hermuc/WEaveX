@@ -300,7 +300,7 @@ impl WorkshopClient {
                     .map(|m| m.as_str().to_string())
             });
         // Fallback for the account login name: parse `AccountName` out of
-        // the embedded JS, or from the header text "Об аккаунте: <span>name</span>".
+        // the embedded JS, or from the header text "About the account: <span>name</span>".
         let account_name = Regex::new(r#"g_AccountName\s*=\s*"([^"]+)""#)
             .ok()
             .and_then(|re| re.captures(&body))

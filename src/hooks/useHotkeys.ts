@@ -14,7 +14,7 @@ export type ActionHandler = (event?: MouseEvent | KeyboardEvent) => void;
  *
  * Uses `KeyboardEvent.code` (physical key position) instead of `e.key`
  * so that hotkeys work regardless of the active keyboard layout
- * (e.g. Russian, French, etc.).
+ * (e.g. French, German, etc.).
  */
 export function useHotkeys(
   handlers: Partial<Record<HotkeyAction, ActionHandler>>,

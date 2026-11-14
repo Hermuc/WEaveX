@@ -420,15 +420,7 @@ pub async fn steam_login_poll_error(state: AppStateHandle<'_>) -> Result<Option<
                     var tLower = t.toLowerCase();
                     var isError = false;
                     var errorWords = [
-                        'incorrect', 'check', 'try again', 'too many', 'invalid', 'error', 'captcha', 'sorry',
-                        '\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435', // проверьте
-                        '\u043d\u0435\u0432\u0435\u0440', // невер
-                        '\u0441\u043d\u043e\u0432\u0430', // снова
-                        '\u0441\u043b\u0438\u0448\u043a\u043e\u043c', // слишком
-                        '\u043e\u0448\u0438\u0431', // ошиб
-                        '\u043a\u0430\u043f\u0447', // капч
-                        '\u0441\u043e\u0432\u043f\u0430\u0434', // совпад
-                        '\u0438\u0437\u0432\u0438\u043d\u0438\u0442\u0435' // извините
+                        'incorrect', 'check', 'try again', 'too many', 'invalid', 'error', 'captcha', 'sorry'
                     ];
                     
                     for (var i = 0; i < errorWords.length; i++) {

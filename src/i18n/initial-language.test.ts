@@ -61,8 +61,8 @@ describe("initial language resolution", () => {
   });
 
   it("ignores an unsupported persisted value and re-detects", () => {
-    // Russian shipped once and was removed; a stale value must not stick.
-    store["weave.ui"] = JSON.stringify({ state: { language: "ru" } });
+    // A locale that is no longer supported must not stick around.
+    store["weave.ui"] = JSON.stringify({ state: { language: "ja" } });
     expect(resolveInitialLanguage(storage(), ["zh-CN"])).toBe("zh");
   });
 

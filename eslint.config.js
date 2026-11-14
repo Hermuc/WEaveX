@@ -63,7 +63,7 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       ...tailwind.configs.recommended.rules,
-      "tailwindcss/no-custom-classname": "off", // Игнорируем кастомные классы вроде hover-shimmer, theme-dark и т.д.
+      "tailwindcss/no-custom-classname": "off", // Allow custom classes such as hover-shimmer, theme-dark, etc.
       "tailwindcss/no-contradicting-classname": "off", // False positives with divide-* and border-*
       "react-refresh/only-export-components": [
         "warn",

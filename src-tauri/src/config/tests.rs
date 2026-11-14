@@ -29,7 +29,7 @@ mod settings_tests {
         let initial_data = json!({
             "general": {
                 "appearance": {
-                    "language": "ru",
+                    "language": "ja",
                     "theme": "light"
                 }
             }
@@ -42,7 +42,7 @@ mod settings_tests {
 
         let settings = SettingsService::load(&settings_path).unwrap();
 
-        assert_eq!(settings.get_language(), "ru");
+        assert_eq!(settings.get_language(), "ja");
         assert_eq!(settings.get_theme(), "light");
     }
 

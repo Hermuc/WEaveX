@@ -15,7 +15,7 @@
   [![Vite](https://img.shields.io/badge/Vite-v8-646CFF?logo=vite&logoColor=white)](https://vite.dev)
   [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
   
-  [简体中文](README.md) · [Русская версия](README.ru.md)
+  [简体中文](README.md)
 </div>
 
 ---
@@ -85,7 +85,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 - **UI Themes**: 6 interface themes and 10 custom accent colors.
 - **Global Hotkeys**: Customizable keyboard shortcuts to control playback, navigate pages, and open views.
-- **Localization**: Interface available in English, Russian and Simplified Chinese — on first launch the app auto-detects your operating system language (falling back to English), and you can switch it any time in Settings → General.
+- **Localization**: Interface available in English and Simplified Chinese — on first launch the app auto-detects your operating system language (falling back to English), and you can switch it any time in Settings → General.
 
 </details>
 

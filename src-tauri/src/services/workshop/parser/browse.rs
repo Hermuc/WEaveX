@@ -428,27 +428,27 @@ fn unescape_json_string(s: &str) -> String {
 }
 
 fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64) {
-    // Приоритет 1: ищем паттерн с многоточием и последним числом в пагинации
-    // Паттерн: <div>...</div><div class="...Panel" tabindex="0" role="button">1,000</div>
-    // ВАЖНО: ищем ПОСЛЕДНЕЕ совпадение, так как троеточий может быть несколько
+    // Priority 1: look for the ellipsis pattern followed by the last number in the pagination.
+    // Pattern: <div>...</div><div class="...Panel" tabindex="0" role="button">1,000</div>
+    // IMPORTANT: look for the LAST match, because there may be several ellipses.
     let re_ellipsis_last = Regex::new(
         r#"<div>\.\.\.</div><div[^>]*class="[^"]*Panel[^"]*"[^>]*tabindex="0"[^>]*role="button"[^>]*>\s*([\d,]+)\s*</div>"#
     ).unwrap();
 
-    // Находим ВСЕ совпадения и берём последнее
+    // Find ALL matches and take the last one.
     let last_match = re_ellipsis_last.captures_iter(html).last();
     if let Some(cap) = last_match {
         if let Ok(max) = cap[1].replace(',', "").parse::<u32>() {
-            // Пытаемся определить общее количество элементов из текста
+            // Try to determine the total number of items from the text.
             let re_total = Regex::new(
-                r#"(?:Showing|Отображаются?)\s+\d+[\s\-–]\d+\s+(?:of|из)\s+([\d,.\s]+)"#,
+                r#"(?:Showing)\s+\d+[\s\-–]\d+\s+(?:of)\s+([\d,.\s]+)"#,
             )
             .unwrap();
             let total_items = re_total
                 .captures(html)
                 .and_then(|cap| cap[1].replace([',', '.', ' '], "").parse::<u64>().ok())
                 .unwrap_or_else(|| {
-                    // Если не удалось извлечь, оцениваем на основе количества элементов на странице
+                    // If extraction failed, estimate from the number of items on the page.
                     let per_page = items.len().max(30) as u64;
                     (max as u64) * per_page
                 });
@@ -456,9 +456,9 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
         }
     }
 
-    // Приоритет 2: извлечение из текста "Showing X-Y of Z"
+    // Priority 2: extract from the text "Showing X-Y of Z".
     let re_total =
-        Regex::new(r#"(?:Showing|Отображаются?)\s+(\d+)[\s\-–](\d+)\s+(?:of|из)\s+([\d,.\s]+)"#)
+        Regex::new(r#"(?:Showing)\s+(\d+)[\s\-–](\d+)\s+(?:of)\s+([\d,.\s]+)"#)
             .unwrap();
     if let Some(cap) = re_total.captures(html) {
         let start: u64 = cap[1].replace([',', '.', ' '], "").parse().unwrap_or(0);
@@ -470,7 +470,7 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
         }
     }
 
-    // Приоритет 3: поиск по селекторам в controls пагинации (старый метод)
+    // Priority 3: search the pagination controls by CSS selector (legacy method).
     if let Ok(paging_sel) =
         Selector::parse(".workshopBrowsePagingControls a, .workshopBrowsePagingControls span")
     {
@@ -489,8 +489,8 @@ fn parse_pagination(doc: &Html, html: &str, items: &[WorkshopItem]) -> (u32, u64
         }
     }
 
-    // Приоритет 4: поиск по ссылкам пагинации с помощью регулярного выражения (старый метод, fallback)
-    // Улучшенный регулярный выражение, поддерживающий любой порядок атрибутов
+    // Priority 4: search the pagination links with a regular expression (legacy method, fallback).
+    // Improved regular expression that tolerates any attribute order.
     let re_pages_1 = Regex::new(r#"class="pagelink"[^>]*>\s*(\d+)\s*<"#).unwrap();
     let re_pages_2 = Regex::new(r#"class="page_current"[^>]*>\s*(\d+)\s*<"#).unwrap();
 
@@ -558,7 +558,7 @@ mod tests {
         let html = r##"
             <div class="workshopBrowsePaging">
                 <div>
-                    Показывать на странице: 9&nbsp;<a href="?appid=431960&amp;p=1&amp;numperpage=18">18</a>&nbsp;<a href="?appid=431960&amp;p=1&amp;numperpage=30">30</a>&nbsp;
+                    Items per page: 9&nbsp;<a href="?appid=431960&amp;p=1&amp;numperpage=18">18</a>&nbsp;<a href="?appid=431960&amp;p=1&amp;numperpage=30">30</a>&nbsp;
                 </div>
                 <div class="workshopBrowsePagingControls">
                      <span class="pagebtn disabled">&lt;</span><span class="page_current">1</span><a class="pagelink" href="?appid=431960&amp;p=2">2</a><a class="pagelink" href="?appid=431960&amp;p=3">3</a>&nbsp;...&nbsp;<a class="pagelink" href="?appid=431960&amp;p=24">24</a><a class="pagebtn" href="?appid=431960&amp;p=2">&gt;</a>

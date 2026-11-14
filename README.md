@@ -15,7 +15,7 @@
   [![Vite](https://img.shields.io/badge/Vite-v8-646CFF?logo=vite&logoColor=white)](https://vite.dev)
   [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
   
-  [English](README.en.md) · [Русская версия](README.ru.md)
+  [English](README.en.md)
 </div>
 
 ---
@@ -85,7 +85,7 @@ https://github.com/user-attachments/assets/45bf371d-6b76-4ecc-93d5-9bc8d95c467a
 
 - **界面主题**：6 套界面主题与 10 种自定义强调色。
 - **全局快捷键**：可自定义键盘快捷键，用于控制播放、切换页面与打开视图。
-- **多语言**：界面提供英语、俄语与简体中文——首次启动时自动检测操作系统语言（无法识别时回落英语），并可随时在「设置 → 通用」中切换。
+- **多语言**：界面提供英语与简体中文——首次启动时自动检测操作系统语言（无法识别时回落英语），并可随时在「设置 → 通用」中切换。
 
 </details>
 
